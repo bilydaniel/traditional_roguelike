@@ -172,6 +172,9 @@ get_entity_collider :: proc(entity: ^Entity) -> Circle {
 }
 
 collide_aabb_circle :: proc(rect: Rect, circle: Circle) -> (la.Vector2f32, bool) {
+	hit: bool
+	push: la.Vector2f32
+
 	circle_center := la.Vector2f32{circle.x, circle.y}
 	rect_center := la.Vector2f32{rect.x + rect.w / 2, rect.y + rect.h / 2}
 
@@ -186,51 +189,56 @@ collide_aabb_circle :: proc(rect: Rect, circle: Circle) -> (la.Vector2f32, bool)
 	diff := circle_center - closest_point
 	dist := la.length(diff)
 
-	if dist >= circle.r {
-		return {}, false // no collision
-	}
+	if dist < circle.r {
+		normal: la.Vector2f32
+		penetration: f32
 
-	normal: la.Vector2f32
-	penetration: f32
-
-	if dist == 0 {
-		dx := aabb_half.x - abs(d.x)
-		dy := aabb_half.y - abs(d.y)
-		if dx < dy {
-			normal = {1 if d.x > 0 else -1, 0}
-			penetration = circle.r + dx
+		if dist == 0 {
+			dx := aabb_half.x - abs(d.x)
+			dy := aabb_half.y - abs(d.y)
+			if dx < dy {
+				normal = {1 if d.x > 0 else -1, 0}
+				penetration = circle.r + dx
+			} else {
+				normal = {0, 1 if d.y > 0 else -1}
+				penetration = circle.r + dy
+			}
 		} else {
-			normal = {0, 1 if d.y > 0 else -1}
-			penetration = circle.r + dy
+			normal = diff / dist
+			penetration = circle.r - dist
 		}
-	} else {
-		normal = diff / dist
-		penetration = circle.r - dist
+		hit = true
+		push = normal * penetration
 	}
 
-	return normal * penetration, true
+
+	return push, hit
 }
 
 collide_circle_circle :: proc(a: Circle, b: Circle) -> (la.Vector2f32, bool) {
+	hit: bool
+	push: la.Vector2f32
+
 	pos_a := la.Vector2f32{a.x, a.y}
 	pos_b := la.Vector2f32{b.x, b.y}
 
 	diff := pos_a - pos_b
 	dist := la.distance(pos_a, pos_b)
 	r_sum := a.r + b.r
-	if dist > r_sum {
-		return {}, false
+
+	if dist <= r_sum {
+		normal: la.Vector2f32
+		penetration: f32
+		if dist == 0 {
+			normal = {1.0, 0} //TODO: probably should do random
+		} else {
+			normal = diff / dist
+		}
+		penetration = r_sum - dist
+		hit = true
+		push = normal * penetration
 	}
 
-	normal: la.Vector2f32
-	penetration: f32
 
-	if dist == 0 {
-		normal = {1.0, 0} //TODO: probably should do random
-	} else {
-		normal = diff / dist
-	}
-	penetration = dist - r_sum
-
-	return normal * penetration, true
+	return push, hit
 }

@@ -185,6 +185,7 @@ main :: proc() {
 	fps: u32 = 0
 	fps_time: f64 = 0
 	last_time := glfw.GetTime()
+	slashing := false
 	for !glfw.WindowShouldClose(window) {
 		frame_start := glfw.GetTime()
 		dt := frame_start - last_time
@@ -219,6 +220,9 @@ main :: proc() {
 		if glfw.GetKey(window, glfw.KEY_D) == glfw.PRESS {
 			movement.x += 1
 		}
+		if glfw.GetKey(window, glfw.KEY_UP) == glfw.PRESS {
+			slashing = false
+		}
 		if movement.x != 0 && movement.y != 0 {
 			movement = la.normalize(movement)
 		}
@@ -226,13 +230,13 @@ main :: proc() {
 		player.vel = movement * player.speed * f32(dt)
 		player.pos += player.vel
 
+		//TODO: optimize, dont check everything, only closest tiles
 		for tile, index in current_level.tiles {
 			if tile.solid {
 				tile_collider := get_tile_collider(u32(index))
 				player_collider := get_entity_collider(player)
 				push, hit := collide_aabb_circle(tile_collider, player_collider)
 				if hit {
-					fmt.printf("hit\n")
 					player.pos += push
 				}
 
@@ -247,16 +251,11 @@ main :: proc() {
 
 				push, hit := collide_circle_circle(player_collider, entity_collider)
 				if hit {
-					fmt.printf("hit\n")
-					player.pos += push
+					player.pos += push / 2
+					entity.pos -= push / 2
 				}
-
 			}
 		}
-
-
-		//entity collision
-
 
 		w, h := glfw.GetFramebufferSize(window)
 		gl.Viewport(0, 0, w, h)
@@ -287,6 +286,23 @@ main :: proc() {
 			if entity.kind != .nil { 	// sentinel
 				push_quad_entity(&vertices, entity)
 			}
+		}
+
+
+		if !slashing {
+			push_slash_arc(
+				&vertices,
+				{100.0, 100.0},
+				18, // inner radius
+				40, // outer radius
+				0.0,
+				math.PI * 0.6, // ~108° wide
+				[4]f32{1, 1, 1, 1 - t}, // white, fades out
+			)
+			slashing = true
+			push_circle(&vertices, {150.0, 150.0}, 20.0, [4]f32{1, 1, 1, 1 - t})
+			push_ring(&vertices, {170.0, 170.0}, 20.0, 35.0, [4]f32{1, 1, 1, 1 - t})
+
 		}
 
 		//push_quad_entity(&vertices, player)
@@ -467,4 +483,123 @@ flush_batch :: proc(vertices: ^[dynamic]f32, vbo: u32) {
 		gl.DrawArrays(gl.TRIANGLES, 0, i32(len(vertices) / 8)) //TODO: change 4 to a variable
 		clear(vertices)
 	}
+}
+push_slash_arc :: proc(
+	vertices: ^[dynamic]f32,
+	center: la.Vector2f32,
+	inner_r, outer_r: f32,
+	facing_angle: f32,
+	arc_width: f32,
+	color: [4]f32,
+	segments: int = 10,
+) {
+	start_angle := facing_angle - arc_width / 2
+	step := arc_width / f32(segments)
+	r, g, b, a := color[0], color[1], color[2], color[3]
+
+	for i := 0; i < segments; i += 1 {
+		a0 := start_angle + step * f32(i)
+		a1 := start_angle + step * f32(i + 1)
+
+		d0 := la.Vector2f32{math.cos(a0), math.sin(a0)}
+		d1 := la.Vector2f32{math.cos(a1), math.sin(a1)}
+
+		in0, out0 := center + d0 * inner_r, center + d0 * outer_r
+		in1, out1 := center + d1 * inner_r, center + d1 * outer_r
+		
+	        //odinfmt: disable
+        append(vertices,
+            in0.x,  in0.y,  -1, -1, r, g, b, a,
+            out0.x, out0.y, -1, -1, r, g, b, a,
+            out1.x, out1.y, -1, -1, r, g, b, a,
+
+            in0.x,  in0.y,  -1, -1, r, g, b, a,
+            out1.x, out1.y, -1, -1, r, g, b, a,
+            in1.x,  in1.y,  -1, -1, r, g, b, a,
+        )
+        //odinfmt: enable
+	}
+}
+
+push_circle :: proc(
+	vertices: ^[dynamic]f32,
+	center: la.Vector2f32,
+	radius: f32,
+	color: [4]f32,
+	segments: int = 32,
+) {
+	step := (math.PI * 2) / f32(segments)
+	r, g, b, a := color[0], color[1], color[2], color[3]
+
+	for i := 0; i < segments; i += 1 {
+		a0 := step * f32(i)
+		a1 := step * f32(i + 1)
+
+		p0 := center + la.Vector2f32{math.cos(a0), math.sin(a0)} * radius
+		p1 := center + la.Vector2f32{math.cos(a1), math.sin(a1)} * radius
+		
+	        //odinfmt: disable
+        append(vertices,
+            center.x, center.y, -1, -1, r, g, b, a,
+            p0.x,     p0.y,     -1, -1, r, g, b, a,
+            p1.x,     p1.y,     -1, -1, r, g, b, a,
+        )
+        //odinfmt: enable
+	}
+}
+
+push_ring :: proc(
+	vertices: ^[dynamic]f32,
+	center: la.Vector2f32,
+	inner_r, outer_r: f32,
+	color: [4]f32,
+	segments: int = 32,
+) {
+	step := (math.PI * 2) / f32(segments)
+	r, g, b, a := color[0], color[1], color[2], color[3]
+
+	for i := 0; i < segments; i += 1 {
+		a0 := step * f32(i)
+		a1 := step * f32(i + 1)
+
+		d0 := la.Vector2f32{math.cos(a0), math.sin(a0)}
+		d1 := la.Vector2f32{math.cos(a1), math.sin(a1)}
+
+		in0, out0 := center + d0 * inner_r, center + d0 * outer_r
+		in1, out1 := center + d1 * inner_r, center + d1 * outer_r
+		
+	        //odinfmt: disable
+        append(vertices,
+            in0.x,  in0.y,  -1, -1, r, g, b, a,
+            out0.x, out0.y, -1, -1, r, g, b, a,
+            out1.x, out1.y, -1, -1, r, g, b, a,
+
+            in0.x,  in0.y,  -1, -1, r, g, b, a,
+            out1.x, out1.y, -1, -1, r, g, b, a,
+            in1.x,  in1.y,  -1, -1, r, g, b, a,
+        )
+        //odinfmt: enable
+	}
+}
+//TODO: @finish
+try_attack_hit :: proc(player: Entity, enemies: []Entity, outer_r: f32, arc_width: f32) {
+	for &enemy in enemies {
+		to_enemy := enemy.pos - player.pos
+		dist := la.length(to_enemy)
+		if dist > outer_r + enemy.collider.r do continue // out of range
+
+		angle_to_enemy := math.atan2(to_enemy.y, to_enemy.x)
+		diff := angle_diff(player.facing_angle, angle_to_enemy)
+		if abs(diff) <= arc_width / 2 {
+			apply_damage(&enemy, player.attack_damage)
+		}
+	}
+}
+
+// shortest signed distance between two angles, handles wraparound at +-PI
+angle_diff :: proc(a, b: f32) -> f32 {
+	d := b - a
+	for d > math.PI {d -= math.PI * 2}
+	for d < -math.PI {d += math.PI * 2}
+	return d
 }
