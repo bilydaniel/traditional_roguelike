@@ -117,8 +117,8 @@ spawn_entities :: proc(entities: ^Entities) {
 	player.speed = 200
 	player.asset_id = .player_1
 	player.color = [4]f32{0.8, 0.3, 0.8, 1.0}
-	player.collider_pos.x = TILE_W / 2
-	player.collider_pos.y = -15
+	player.collider_pos.x = player.size.x / 2
+	player.collider_pos.y = player.size.y - 15
 	player.collider_r = 6
 
 	entity1: Entity_id
@@ -140,6 +140,9 @@ spawn_entities :: proc(entities: ^Entities) {
 		entity.speed = 200
 		entity.asset_id = .demon
 		entity.color = [4]f32{0.8, 0.0, 0.0, 1.0}
+		entity.collider_pos.x = entity.size.x / 2
+		entity.collider_pos.y = entity.size.y - 15
+		entity.collider_r = 6
 	}
 
 	remove_entity(entities, entity1)
@@ -204,6 +207,30 @@ collide_aabb_circle :: proc(rect: Rect, circle: Circle) -> (la.Vector2f32, bool)
 		normal = diff / dist
 		penetration = circle.r - dist
 	}
+
+	return normal * penetration, true
+}
+
+collide_circle_circle :: proc(a: Circle, b: Circle) -> (la.Vector2f32, bool) {
+	pos_a := la.Vector2f32{a.x, a.y}
+	pos_b := la.Vector2f32{b.x, b.y}
+
+	diff := pos_a - pos_b
+	dist := la.distance(pos_a, pos_b)
+	r_sum := a.r + b.r
+	if dist > r_sum {
+		return {}, false
+	}
+
+	normal: la.Vector2f32
+	penetration: f32
+
+	if dist == 0 {
+		normal = {1.0, 0} //TODO: probably should do random
+	} else {
+		normal = diff / dist
+	}
+	penetration = dist - r_sum
 
 	return normal * penetration, true
 }

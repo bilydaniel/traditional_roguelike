@@ -204,8 +204,8 @@ main :: proc() {
 		}
 
 		entities := &game_state.entities
-		player_ref := entities.player_id
-		player := get_entity(entities, player_ref)
+		player_id := entities.player_id
+		player := get_entity(entities, player_id)
 		movement := la.Vector2f32{}
 		if glfw.GetKey(window, glfw.KEY_W) == glfw.PRESS {
 			movement.y -= 1
@@ -223,8 +223,8 @@ main :: proc() {
 			movement = la.normalize(movement)
 		}
 
-		//tile collision
 		player.vel = movement * player.speed * f32(dt)
+		player.pos += player.vel
 
 		for tile, index in current_level.tiles {
 			if tile.solid {
@@ -240,7 +240,20 @@ main :: proc() {
 		}
 
 
-		player.pos += player.vel
+		for &entity, index in game_state.entities.entities {
+			if entity.id != player_id {
+				entity_collider := get_entity_collider(&entity)
+				player_collider := get_entity_collider(player)
+
+				push, hit := collide_circle_circle(player_collider, entity_collider)
+				if hit {
+					fmt.printf("hit\n")
+					player.pos += push
+				}
+
+			}
+		}
+
 
 		//entity collision
 
