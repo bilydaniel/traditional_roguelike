@@ -13,54 +13,41 @@ import stbi "vendor:stb/image"
 import gl "vendor:OpenGL"
 import "vendor:glfw"
 
+//TODO:
+// collision, solid tiles
+// add profiler, profile some basic blocks
+// profile the entity dereference, is hashing slow?
+// combat - basics to figure out if its fun, how much polish ads to the fun?
+// fov
+// level generation
+// pathfinding
+// ui
+// inventory
+// spells / talents / specialities
+
+//TODO: @add facing based on the last attack, turning could be slow, not instant, when you do left arrow nad you face right you gonna only turn a bit, if you are backpaddling you can trip over or something to punish kiting...
+//TODO: @add start doing ui, add log quickly, alot of games in roguelike is based on a log
+
+//TODO: add ebo to have less data to draw
+//TODO: instanced rendering, use glDrawArraysInstanced
+//TODO: use debug callback gl.Enable(gl.DEBUG_OUTPUT) + gl.DebugMessageCallback(...)
+
 TARGET_FPS :: 144
 FRAME_TIME :: 1.0 / TARGET_FPS
-TILE_W :: 16
-TILE_H :: 24
-TILE_SCALE :: 3
 
 LEVEL_W :: 100
 LEVEL_H :: 100
 
 
-tileset_w: i32
-tileset_h: i32
-
-//TODO: camera
-//TODO: add ebo to have less data to draw
-//TODO: instanced rendering, use glDrawArraysInstanced
-//TODO: use debug callback gl.Enable(gl.DEBUG_OUTPUT) + gl.DebugMessageCallback(...)
-Rect :: struct {
-	x: f32,
-	y: f32,
-	w: f32,
-	h: f32,
-}
-
-
 Game_state :: struct {
+	//TODO: cache lines
 	levels:        [dynamic]Level,
 	current_level: u32,
-	entities:      [4096]Entity,
+	entities:      Entities,
+	entity_map:    map[u32]u32,
+	camera:        Camera,
 }
 
-Entity :: struct {
-	//TODO: did anton put generation into entity?
-	pos:      la.Vector2f32,
-	size:     la.Vector2f32,
-	speed:    f32,
-	asset_id: u32,
-	color:    [4]f32,
-}
-
-Tile :: struct {
-	asset_id: u32,
-	color:    [4]f32,
-}
-
-Level :: struct {
-	tiles: [LEVEL_W * LEVEL_H]Tile,
-}
 
 Camera :: struct {
 	pos:       la.Vector2f32,
@@ -69,45 +56,45 @@ Camera :: struct {
 }
 
 game_state_init :: proc() -> ^Game_state {
-	//TODO: permanent arena??
+	//TODO: use a permanent arena, can i somehow investigate the memory usage?
 	game_state := new(Game_state)
+	init_entities(&game_state.entities)
 	append(&game_state.levels, Level{})
 	level := &game_state.levels[0]
 	for i := 0; i < len(level.tiles); i += 1 {
-		level.tiles[i] = Tile {
-			asset_id = 24832,
-			color    = {0.08, 0.07, 0.04, 1},
+		if i > 0 && i < 100 {
+			level.tiles[i] = Tile {
+				asset_id = .wall,
+				color    = {176.0 / 255, 79.0 / 255, 56.0 / 255, 1.0},
+				solid    = true,
+			}
+		} else {
+			level.tiles[i] = Tile {
+				asset_id = .floor,
+				color    = {93.0 / 255, 93.0 / 255, 93.0 / 255, 1.0},
+				solid    = false,
+			}
 		}
 	}
 
-	for i := 0; i < 10; i += 1 {
-		game_state.entities[i] = Entity {
-			pos      = la.Vector2f32{f32(i * 50), f32(i * 50)},
-			speed    = 200,
-			size     = la.Vector2f32{TILE_W * TILE_SCALE, TILE_H * TILE_SCALE},
-			asset_id = 24077,
-			color    = [4]f32{0.8, 0.0, 0.0, 1.0},
-		}
-	}
+
+	camera := Camera{}
+	camera.zoom = 1.0
+	camera.smoothing = 5.0
+	game_state.camera = camera
+
+	sprite_table = build_sprite_table()
+
+	spawn_entities(&game_state.entities)
+
 	return game_state
 }
 
 main :: proc() {
-	game_state := game_state_init()
-	camera := Camera{}
-	camera.zoom = 1.0
-	camera.smoothing = 5.0
-	player := Entity {
-		pos      = la.Vector2f32{100, 100},
-		size     = la.Vector2f32{TILE_W * TILE_SCALE, TILE_H * TILE_SCALE},
-		speed    = 200,
-		asset_id = 1,
-		color    = [4]f32{0.8, 0.3, 0.8, 1.0},
-	}
-
-
 	context.logger = log.create_console_logger()
 	defer log.destroy_console_logger(context.logger)
+
+	game_state := game_state_init()
 
 	if !glfw.Init() {
 		log.error("glfw init failed")
@@ -166,9 +153,6 @@ main :: proc() {
 		log.error("failed loading file")
 		return
 	}
-	fmt.println(width, height)
-	tileset_w = width
-	tileset_h = height
 
 	texture: u32
 	gl.GenTextures(1, &texture)
@@ -198,22 +182,6 @@ main :: proc() {
 	gl.BindTexture(gl.TEXTURE_2D, texture)
 
 
-	playerDest := Rect {
-		x = 100,
-		y = 100,
-		w = 32,
-		h = 48,
-	}
-
-	playerSource := Rect {
-		x = f32(2 * TILE_W) / f32(width), // column 5 — pick your player's tile
-		y = f32(1 * TILE_H) / f32(height), // row 2
-		w = f32(TILE_W) / f32(width),
-		h = f32(TILE_H) / f32(height),
-	}
-	playerColor: [4]f32 = {1.0, 0.0, 1.0, 1.0}
-
-
 	fps: u32 = 0
 	fps_time: f64 = 0
 	last_time := glfw.GetTime()
@@ -224,12 +192,20 @@ main :: proc() {
 		fps += 1
 		last_time = frame_start
 
-		glfw.PollEvents() //TODO: when should i poll??
+		glfw.PollEvents()
+
+
+		levels := game_state.levels
+		current_level_index := game_state.current_level
+		current_level := &levels[current_level_index]
 
 		if glfw.GetKey(window, glfw.KEY_ESCAPE) == glfw.PRESS {
 			glfw.SetWindowShouldClose(window, true)
 		}
 
+		entities := &game_state.entities
+		player_ref := entities.player_id
+		player := get_entity(entities, player_ref)
 		movement := la.Vector2f32{}
 		if glfw.GetKey(window, glfw.KEY_W) == glfw.PRESS {
 			movement.y -= 1
@@ -246,15 +222,37 @@ main :: proc() {
 		if movement.x != 0 && movement.y != 0 {
 			movement = la.normalize(movement)
 		}
-		player.pos += movement * player.speed * f32(dt)
+
+		//tile collision
+		player.vel = movement * player.speed * f32(dt)
+
+		for tile, index in current_level.tiles {
+			if tile.solid {
+				tile_collider := get_tile_collider(u32(index))
+				player_collider := get_entity_collider(player)
+				push, hit := collide_aabb_circle(tile_collider, player_collider)
+				if hit {
+					fmt.printf("hit\n")
+					player.pos += push
+				}
+
+			}
+		}
+
+
+		player.pos += player.vel
+
+		//entity collision
 
 
 		w, h := glfw.GetFramebufferSize(window)
 		gl.Viewport(0, 0, w, h)
-		gl.ClearColor(0.24, 0.04, 0.41, 1.0) // TODO: figure out a better color
+		//gl.ClearColor(0.4, 0.04, 0.41, 1.0) // TODO: figure out a better color
+		gl.ClearColor(42 / 255, 42 / 255, 42 / 255, 1.0) // TODO: figure out a better color
 		gl.Clear(gl.COLOR_BUFFER_BIT) // uses the color to clear
 
 		player_center := player.pos + player.size * 0.5
+		camera := &game_state.camera
 		target := player_center - la.Vector2f32{f32(w), f32(h)} * 0.5 / camera.zoom
 		t := 1.0 - math.exp(-camera.smoothing * f32(dt))
 		camera.pos += (target - camera.pos) * t
@@ -266,19 +264,19 @@ main :: proc() {
 
 		gl.BindVertexArray(vao)
 
-		levels := game_state.levels
-		current_level_index := game_state.current_level
-		current_level := &levels[current_level_index]
 
 		for tile, index in current_level.tiles {
-			push_quad_tile(&vertices, tile, index)
+			push_quad_tile(&vertices, index, sprite_table[tile.asset_id], tile.color)
 		}
 
-		for entity in game_state.entities {
-			push_quad_entity(&vertices, entity)
+		//TODO: figure out something smarter, iterator?
+		for entity, index in game_state.entities.entities {
+			if entity.kind != .nil { 	// sentinel
+				push_quad_entity(&vertices, entity)
+			}
 		}
 
-		push_quad_entity(&vertices, player)
+		//push_quad_entity(&vertices, player)
 		flush_batch(&vertices, vbo)
 		glfw.SwapBuffers(window)
 
@@ -404,54 +402,30 @@ push_quad_entity :: proc(vertices: ^[dynamic]f32, entity: Entity) {
 	}
 
 
-	id := f32(entity.asset_id)
-	x := i32(math.mod(id, f32(tileset_w / TILE_W)))
-	y := i32(id / f32(tileset_w / TILE_W))
-
-	source := Rect {
-		x = f32(x * TILE_W) / f32(tileset_w),
-		y = f32(y * TILE_H) / f32(tileset_h),
-		w = f32(TILE_W) / f32(tileset_w),
-		h = f32(TILE_H) / f32(tileset_h),
-	}
+	id := entity.asset_id
+	source := sprite_table[id]
 
 	color := entity.color
 	push_quad(vertices, destination, source, color)
 }
 
 
-push_quad_tile :: proc(vertices: ^[dynamic]f32, tile: Tile, index: int) {
-	idx := f32(index)
-	x_dest := math.mod(idx, f32(LEVEL_W))
-	y_dest := idx / f32(LEVEL_W)
-
+push_quad_tile :: proc(vertices: ^[dynamic]f32, index: int, sprite: Sprite, color: Color) {
+	tile_pos := get_tile_pos(u32(index))
+	pixel_pos := get_tile_pixel_pos(tile_pos)
 	destination := Rect {
-		x = x_dest * TILE_W * TILE_SCALE,
-		y = y_dest * TILE_H * TILE_SCALE,
+		x = f32(pixel_pos.x),
+		y = f32(pixel_pos.y),
 		w = TILE_W * TILE_SCALE,
 		h = TILE_H * TILE_SCALE,
 	}
-
-
-	id := f32(tile.asset_id)
-	x := i32(math.mod(id, f32(tileset_w / TILE_W)))
-	y := i32(id / f32(tileset_w / TILE_W))
-
-	source := Rect {
-		x = f32(x * TILE_W) / f32(tileset_w),
-		y = f32(y * TILE_H) / f32(tileset_h),
-		w = f32(TILE_W) / f32(tileset_w),
-		h = f32(TILE_H) / f32(tileset_h),
-	}
-
-	color := tile.color
-	push_quad(vertices, destination, source, color)
+	push_quad(vertices, destination, sprite, color)
 }
 
-push_quad :: proc(vertices: ^[dynamic]f32, destination: Rect, source: Rect, color: [4]f32) {
+push_quad :: proc(vertices: ^[dynamic]f32, destination: Rect, source: Sprite, color: [4]f32) {
 	//TODO: probably come up with more efficient way of doing this, feels messy
 	x, y, w, h := destination.x, destination.y, destination.w, destination.h
-	u0, v0, u1, v1 := source.x, source.y, source.x + source.w, source.y + source.h
+	u0, v0, u1, v1 := source.u0, source.v0, source.u1, source.v1
 	//TODO: could be fun to make a gradient with two colors
 	r, g, b, a := color[0], color[1], color[2], color[3]
 	
