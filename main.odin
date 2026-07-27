@@ -55,6 +55,12 @@ Camera :: struct {
 	smoothing: f32,
 }
 
+apply_camera :: proc(camera: Camera, x_in: f32, y_in: f32) -> (x_out: f32, y_out: f32) {
+	x_out = (x_in + camera.pos.x) / camera.zoom
+	y_out = (y_in + camera.pos.y) / camera.zoom
+	return
+}
+
 game_state_init :: proc() -> ^Game_state {
 	//TODO: use a permanent arena, can i somehow investigate the memory usage?
 	game_state := new(Game_state)
@@ -90,7 +96,12 @@ game_state_init :: proc() -> ^Game_state {
 	return game_state
 }
 
+
 main :: proc() {
+	//TODO: need a different kind of profiling for a game
+
+	begin_profile()
+
 	context.logger = log.create_console_logger()
 	defer log.destroy_console_logger(context.logger)
 
@@ -223,6 +234,22 @@ main :: proc() {
 		if glfw.GetKey(window, glfw.KEY_UP) == glfw.PRESS {
 			slashing = false
 		}
+
+		if glfw.GetKey(window, glfw.KEY_KP_ADD) == glfw.PRESS {
+			game_state.camera.zoom += 0.1
+		}
+
+		if glfw.GetKey(window, glfw.KEY_KP_SUBTRACT) == glfw.PRESS {
+			game_state.camera.zoom -= 0.1
+		}
+
+		mouse_x, mouse_y := glfw.GetCursorPos(window)
+		world_x, world_y := apply_camera(game_state.camera, f32(mouse_x), f32(mouse_y))
+
+		fmt.printf("player - x: %v, y: %v \n", player.pos.x, player.pos.y)
+		fmt.printf("mouse -  x: %v, y: %v \n", world_x, world_y)
+		fmt.printf("******************************\n")
+
 		if movement.x != 0 && movement.y != 0 {
 			movement = la.normalize(movement)
 		}
@@ -317,10 +344,13 @@ main :: proc() {
 
 		frame_elapsed := glfw.GetTime() - frame_start
 		remaining := FRAME_TIME - frame_elapsed
+		sleep_block := time_block(.sleep)
 		if remaining > 0 {
 			time.sleep(time.Duration(remaining * 1e9)) // seconds -> nanoseconds
 		}
+		block_end(sleep_block)
 	}
+	end_profile()
 }
 
 
@@ -582,24 +612,24 @@ push_ring :: proc(
 	}
 }
 //TODO: @finish
-try_attack_hit :: proc(player: Entity, enemies: []Entity, outer_r: f32, arc_width: f32) {
-	for &enemy in enemies {
-		to_enemy := enemy.pos - player.pos
-		dist := la.length(to_enemy)
-		if dist > outer_r + enemy.collider.r do continue // out of range
-
-		angle_to_enemy := math.atan2(to_enemy.y, to_enemy.x)
-		diff := angle_diff(player.facing_angle, angle_to_enemy)
-		if abs(diff) <= arc_width / 2 {
-			apply_damage(&enemy, player.attack_damage)
-		}
-	}
-}
-
-// shortest signed distance between two angles, handles wraparound at +-PI
-angle_diff :: proc(a, b: f32) -> f32 {
-	d := b - a
-	for d > math.PI {d -= math.PI * 2}
-	for d < -math.PI {d += math.PI * 2}
-	return d
-}
+// try_attack_hit :: proc(player: Entity, enemies: []Entity, outer_r: f32, arc_width: f32) {
+// 	for &enemy in enemies {
+// 		to_enemy := enemy.pos - player.pos
+// 		dist := la.length(to_enemy)
+// 		if dist > outer_r + enemy.collider.r do continue // out of range
+//
+// 		angle_to_enemy := math.atan2(to_enemy.y, to_enemy.x)
+// 		diff := angle_diff(player.facing_angle, angle_to_enemy)
+// 		if abs(diff) <= arc_width / 2 {
+// 			apply_damage(&enemy, player.attack_damage)
+// 		}
+// 	}
+// }
+//
+// // shortest signed distance between two angles, handles wraparound at +-PI
+// angle_diff :: proc(a, b: f32) -> f32 {
+// 	d := b - a
+// 	for d > math.PI {d -= math.PI * 2}
+// 	for d < -math.PI {d += math.PI * 2}
+// 	return d
+// }
