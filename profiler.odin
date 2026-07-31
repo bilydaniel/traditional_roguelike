@@ -15,6 +15,10 @@ Anchor_ID :: enum {
 	update,
 	draw,
 	sleep,
+	get_entity,
+	physics,
+	physics_loop,
+	collision_tile,
 }
 
 Profiler :: struct {

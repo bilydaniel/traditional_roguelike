@@ -2,6 +2,9 @@ package main
 import la "core:math/linalg"
 
 
+LEVEL_W :: 100
+LEVEL_H :: 100
+
 Tile :: struct {
 	asset_id: Asset_id,
 	color:    [4]f32,

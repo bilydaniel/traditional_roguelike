@@ -12,9 +12,8 @@ out vec2 vTexCoord;
 out vec4 vColor;
 
 void main() {
-    vec2 world = aPos - uCam;
-    world *= uZoom;
-    vec2 ndc = (world / uResolution) * 2.0 - 1.0;
+    vec2 screen = (aPos - uCam) * uZoom;
+    vec2 ndc = (screen / uResolution) * 2.0 - 1.0; // 0 -> 1
     ndc.y = -ndc.y;
     gl_Position = vec4(ndc, 0.0, 1.0);
     vTexCoord = aTexCoord;

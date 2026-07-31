@@ -36,6 +36,7 @@ Entity :: struct {
 	kind:         Kind,
 	pos:          la.Vector2f32,
 	vel:          la.Vector2f32,
+	rotation:     f32,
 	size:         la.Vector2f32,
 	speed:        f32,
 	asset_id:     Asset_id,
@@ -43,6 +44,7 @@ Entity :: struct {
 	//TODO: @finish, figure out the position and size of the collider in aseprite
 	collider_pos: la.Vector2f32, // relative to pos
 	collider_r:   f32,
+	attacking:    bool,
 }
 
 create_entity :: proc(entities: ^Entities, kind: Kind) -> Entity_id {
@@ -80,6 +82,9 @@ entity_deref :: proc(entities: ^Entities, id: Entity_id) -> u32 {
 }
 
 get_entity :: proc(entities: ^Entities, id: Entity_id) -> ^Entity {
+	//TODO: remove profiling gonna eat alot
+	profile := time_block(.get_entity)
+	defer block_end(profile)
 	index := entity_deref(entities, id)
 	result_entity: ^Entity = &entities.entities[index]
 	if index == 0 {
@@ -119,7 +124,7 @@ spawn_entities :: proc(entities: ^Entities) {
 	player.color = [4]f32{0.8, 0.3, 0.8, 1.0}
 	player.collider_pos.x = player.size.x / 2
 	player.collider_pos.y = player.size.y - 15
-	player.collider_r = 6
+	player.collider_r = 6 * TILE_SCALE
 
 	entity1: Entity_id
 	entity2: Entity_id
@@ -142,7 +147,7 @@ spawn_entities :: proc(entities: ^Entities) {
 		entity.color = [4]f32{0.8, 0.0, 0.0, 1.0}
 		entity.collider_pos.x = entity.size.x / 2
 		entity.collider_pos.y = entity.size.y - 15
-		entity.collider_r = 6
+		entity.collider_r = 6 * TILE_SCALE
 	}
 
 	remove_entity(entities, entity1)

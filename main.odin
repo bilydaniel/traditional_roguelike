@@ -5,7 +5,10 @@ import "core:fmt"
 import "core:log"
 import "core:math"
 import la "core:math/linalg"
+import "core:mem"
+import "core:mem/virtual"
 import "core:os"
+import "core:sort"
 import "core:strings"
 import "core:time"
 import stbi "vendor:stb/image"
@@ -14,8 +17,6 @@ import gl "vendor:OpenGL"
 import "vendor:glfw"
 
 //TODO:
-// collision, solid tiles
-// add profiler, profile some basic blocks
 // profile the entity dereference, is hashing slow?
 // combat - basics to figure out if its fun, how much polish ads to the fun?
 // fov
@@ -25,18 +26,14 @@ import "vendor:glfw"
 // inventory
 // spells / talents / specialities
 
+//TODO: I SHOULD PROBABLY SWITCH TO SOME OTHER MEASUREMENT OF SIZE FROM PIXELS
+
 //TODO: @add facing based on the last attack, turning could be slow, not instant, when you do left arrow nad you face right you gonna only turn a bit, if you are backpaddling you can trip over or something to punish kiting...
 //TODO: @add start doing ui, add log quickly, alot of games in roguelike is based on a log
 
 //TODO: add ebo to have less data to draw
 //TODO: instanced rendering, use glDrawArraysInstanced
 //TODO: use debug callback gl.Enable(gl.DEBUG_OUTPUT) + gl.DebugMessageCallback(...)
-
-TARGET_FPS :: 144
-FRAME_TIME :: 1.0 / TARGET_FPS
-
-LEVEL_W :: 100
-LEVEL_H :: 100
 
 
 Game_state :: struct {
@@ -46,19 +43,7 @@ Game_state :: struct {
 	entities:      Entities,
 	entity_map:    map[u32]u32,
 	camera:        Camera,
-}
-
-
-Camera :: struct {
-	pos:       la.Vector2f32,
-	zoom:      f32,
-	smoothing: f32,
-}
-
-apply_camera :: proc(camera: Camera, x_in: f32, y_in: f32) -> (x_out: f32, y_out: f32) {
-	x_out = (x_in + camera.pos.x) / camera.zoom
-	y_out = (y_in + camera.pos.y) / camera.zoom
-	return
+	dt:            f64,
 }
 
 game_state_init :: proc() -> ^Game_state {
@@ -96,194 +81,66 @@ game_state_init :: proc() -> ^Game_state {
 	return game_state
 }
 
+frame_arena: virtual.Arena
+frame_allocator: mem.Allocator
 
 main :: proc() {
 	//TODO: need a different kind of profiling for a game
-
 	begin_profile()
-
 	context.logger = log.create_console_logger()
 	defer log.destroy_console_logger(context.logger)
 
+	//TODO: reserve more at start?
+	arena_err := virtual.arena_init_growing(&frame_arena)
+	if arena_err != nil {
+		log.error("failed to init arena")
+		return
+	}
+	frame_allocator = virtual.arena_allocator(&frame_arena)
+
 	game_state := game_state_init()
 
-	if !glfw.Init() {
-		log.error("glfw init failed")
-		return
-	}
-	defer glfw.Terminate()
-
-	glfw.WindowHint(glfw.CONTEXT_VERSION_MAJOR, 3)
-	glfw.WindowHint(glfw.CONTEXT_VERSION_MINOR, 3)
-	glfw.WindowHint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
-
-	window := glfw.CreateWindow(800, 600, "Traditional Roguelike", nil, nil)
-	if window == nil {
-		log.error("failed to create window")
-		return
-	}
-
-	glfw.MakeContextCurrent(window)
-	glfw.SwapInterval(0) // vsync off
-
-	gl.load_up_to(3, 3, glfw.gl_set_proc_address)
-
-	gl.Viewport(0, 0, 800, 600)
-	//glfw.SetFramebufferSizeCallback(window, window_resize)
-
-	vao: u32 = 0
-	gl.GenVertexArrays(1, &vao)
-	gl.BindVertexArray(vao)
-
-
-	vbo: u32 = 0
-	gl.GenBuffers(1, &vbo)
-	gl.BindBuffer(gl.ARRAY_BUFFER, vbo)
-
-	vertices: [dynamic]f32
-
-	vertex_attrib_floats := 8
-	stride := i32(vertex_attrib_floats * size_of(f32))
-	gl.VertexAttribPointer(0, 2, gl.FLOAT, gl.FALSE, stride, uintptr(0))
-	gl.EnableVertexAttribArray(0) // aPos
-	gl.VertexAttribPointer(1, 2, gl.FLOAT, gl.FALSE, stride, uintptr(2 * size_of(f32))) // aTexCoord
-	gl.EnableVertexAttribArray(1)
-	gl.VertexAttribPointer(2, 4, gl.FLOAT, gl.FALSE, stride, uintptr(4 * size_of(f32))) // aColor
-	gl.EnableVertexAttribArray(2)
-
-
-	shader_program, ok := shader_make("shader.vert", "shader.frag")
+	renderer, ok := init_renderer()
 	if !ok {
 		return
 	}
-	shader_use(shader_program)
-
-	width, height, channels: i32
-	atlas := stbi.load("oryx_tileset.png", &width, &height, &channels, 4) // no idea of 4 or 0
-	if atlas == nil {
-		log.error("failed loading file")
-		return
-	}
-
-	texture: u32
-	gl.GenTextures(1, &texture)
-	gl.BindTexture(gl.TEXTURE_2D, texture)
-
-	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
-	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
-	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
-	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
-
-	gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, atlas)
-	//gl.GenerateMipmap(gl.TEXTURE_2D)
-	stbi.image_free(atlas)
-
-	gl.Enable(gl.BLEND) //TODO: no idea what it does
-	gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
-
-
-	u_res := gl.GetUniformLocation(shader_program.id, "uResolution")
-	u_tex := gl.GetUniformLocation(shader_program.id, "uTexture")
-
-	u_cam := gl.GetUniformLocation(shader_program.id, "uCam")
-	u_zoom := gl.GetUniformLocation(shader_program.id, "uZoom")
-
-
-	gl.ActiveTexture(gl.TEXTURE0)
-	gl.BindTexture(gl.TEXTURE_2D, texture)
-
 
 	fps: u32 = 0
 	fps_time: f64 = 0
 	last_time := glfw.GetTime()
 	slashing := false
-	for !glfw.WindowShouldClose(window) {
+	for !glfw.WindowShouldClose(renderer.window) {
 		frame_start := glfw.GetTime()
-		dt := frame_start - last_time
-		fps_time += dt
+		game_state.dt = frame_start - last_time
+		fps_time += game_state.dt
 		fps += 1
 		last_time = frame_start
 
 		glfw.PollEvents()
 
 
+		window := renderer.window
+
+		input(window, game_state)
+
+		ai(game_state)
+
+		physics_block := time_block(.physics)
+		physics(game_state)
+		block_end(physics_block)
+
+
+		// DRAW
+		entities := &game_state.entities
+		player_id := entities.player_id
+		player := get_entity(entities, player_id)
+		circle := get_entity_collider(player)
+
 		levels := game_state.levels
 		current_level_index := game_state.current_level
 		current_level := &levels[current_level_index]
 
-		if glfw.GetKey(window, glfw.KEY_ESCAPE) == glfw.PRESS {
-			glfw.SetWindowShouldClose(window, true)
-		}
-
-		entities := &game_state.entities
-		player_id := entities.player_id
-		player := get_entity(entities, player_id)
-		movement := la.Vector2f32{}
-		if glfw.GetKey(window, glfw.KEY_W) == glfw.PRESS {
-			movement.y -= 1
-		}
-		if glfw.GetKey(window, glfw.KEY_S) == glfw.PRESS {
-			movement.y += 1
-		}
-		if glfw.GetKey(window, glfw.KEY_A) == glfw.PRESS {
-			movement.x -= 1
-		}
-		if glfw.GetKey(window, glfw.KEY_D) == glfw.PRESS {
-			movement.x += 1
-		}
-		if glfw.GetKey(window, glfw.KEY_UP) == glfw.PRESS {
-			slashing = false
-		}
-
-		if glfw.GetKey(window, glfw.KEY_KP_ADD) == glfw.PRESS {
-			game_state.camera.zoom += 0.1
-		}
-
-		if glfw.GetKey(window, glfw.KEY_KP_SUBTRACT) == glfw.PRESS {
-			game_state.camera.zoom -= 0.1
-		}
-
-		mouse_x, mouse_y := glfw.GetCursorPos(window)
-		world_x, world_y := apply_camera(game_state.camera, f32(mouse_x), f32(mouse_y))
-
-		fmt.printf("player - x: %v, y: %v \n", player.pos.x, player.pos.y)
-		fmt.printf("mouse -  x: %v, y: %v \n", world_x, world_y)
-		fmt.printf("******************************\n")
-
-		if movement.x != 0 && movement.y != 0 {
-			movement = la.normalize(movement)
-		}
-
-		player.vel = movement * player.speed * f32(dt)
-		player.pos += player.vel
-
-		//TODO: optimize, dont check everything, only closest tiles
-		for tile, index in current_level.tiles {
-			if tile.solid {
-				tile_collider := get_tile_collider(u32(index))
-				player_collider := get_entity_collider(player)
-				push, hit := collide_aabb_circle(tile_collider, player_collider)
-				if hit {
-					player.pos += push
-				}
-
-			}
-		}
-
-
-		for &entity, index in game_state.entities.entities {
-			if entity.id != player_id {
-				entity_collider := get_entity_collider(&entity)
-				player_collider := get_entity_collider(player)
-
-				push, hit := collide_circle_circle(player_collider, entity_collider)
-				if hit {
-					player.pos += push / 2
-					entity.pos -= push / 2
-				}
-			}
-		}
-
+		draw_block := time_block(.draw)
 		w, h := glfw.GetFramebufferSize(window)
 		gl.Viewport(0, 0, w, h)
 		//gl.ClearColor(0.4, 0.04, 0.41, 1.0) // TODO: figure out a better color
@@ -293,48 +150,66 @@ main :: proc() {
 		player_center := player.pos + player.size * 0.5
 		camera := &game_state.camera
 		target := player_center - la.Vector2f32{f32(w), f32(h)} * 0.5 / camera.zoom
-		t := 1.0 - math.exp(-camera.smoothing * f32(dt))
+		t := 1.0 - math.exp(-camera.smoothing * f32(game_state.dt))
 		camera.pos += (target - camera.pos) * t
 
-		gl.Uniform2f(u_res, f32(w), f32(h))
-		gl.Uniform1i(u_tex, 0)
-		gl.Uniform2f(u_cam, camera.pos.x, camera.pos.y)
-		gl.Uniform1f(u_zoom, camera.zoom)
+		gl.Uniform2f(renderer.u_res, f32(w), f32(h))
+		gl.Uniform1i(renderer.u_tex, 0)
+		gl.Uniform2f(renderer.u_cam, camera.pos.x, camera.pos.y)
+		gl.Uniform1f(renderer.u_zoom, camera.zoom)
 
-		gl.BindVertexArray(vao)
+		gl.BindVertexArray(renderer.vao)
 
 
 		for tile, index in current_level.tiles {
-			push_quad_tile(&vertices, index, sprite_table[tile.asset_id], tile.color)
+			push_quad_tile(&renderer.vertices, index, sprite_table[tile.asset_id], tile.color)
 		}
 
 		//TODO: figure out something smarter, iterator?
 		for entity, index in game_state.entities.entities {
 			if entity.kind != .nil { 	// sentinel
-				push_quad_entity(&vertices, entity)
+				push_quad_entity(&renderer.vertices, entity)
 			}
 		}
 
 
+		player_collider := get_entity_collider(player)
+		//TODO: how to rotate the asset?
+		push_quad(
+			&renderer.vertices,
+			{player_collider.x, player_collider.y, TILE_W * TILE_SCALE, TILE_H * TILE_SCALE},
+			sprite_table[.arrow_full],
+			{1.0, 1.0, 1.0, 1.0},
+		)
+
 		if !slashing {
 			push_slash_arc(
-				&vertices,
-				{100.0, 100.0},
-				18, // inner radius
-				40, // outer radius
-				0.0,
+				&renderer.vertices,
+				{player_collider.x, player_collider.y},
+				18,
+				40,
+				player.rotation,
 				math.PI * 0.6, // ~108° wide
 				[4]f32{1, 1, 1, 1 - t}, // white, fades out
 			)
 			slashing = true
-			push_circle(&vertices, {150.0, 150.0}, 20.0, [4]f32{1, 1, 1, 1 - t})
-			push_ring(&vertices, {170.0, 170.0}, 20.0, 35.0, [4]f32{1, 1, 1, 1 - t})
-
 		}
 
+
+		//TODO: figure out the correct position and size of the collision circle, seems off
+		// when do i apply scaling??
+		//TODO: doesent work with walls, works fine with entities
+
+		for i: u32 = 0; i < entities.entity_count; i += 1 {
+			circle := get_entity_collider(&entities.entities[i])
+			push_circle(&renderer.vertices, {circle.x, circle.y}, circle.r, {1.0, 1.0, 1.0, 1.0})
+		}
+
+
 		//push_quad_entity(&vertices, player)
-		flush_batch(&vertices, vbo)
+		flush_batch(&renderer.vertices, renderer.vbo)
 		glfw.SwapBuffers(window)
+		block_end(draw_block)
 
 		if fps_time >= 1 {
 			fmt.printf("\rfps: %d", fps)
@@ -356,99 +231,6 @@ main :: proc() {
 
 window_resize :: proc "cdecl" (window: glfw.WindowHandle, width: i32, height: i32) {
 	gl.Viewport(0, 0, width, height)
-}
-
-Shader :: struct {
-	id: u32,
-}
-
-shader_make :: proc(vertex_path: string, fragment_path: string) -> (Shader, bool) {
-	shader := Shader{}
-	temp := runtime.default_temp_allocator_temp_begin()
-	defer runtime.default_temp_allocator_temp_end(temp)
-
-	vertex_shader_source, err := os.read_entire_file(vertex_path, context.temp_allocator)
-	if err != nil {
-		fmt.eprintfln("vertex shader read error: %s", err)
-		return shader, false
-	}
-
-	fragment_shader_source, err2 := os.read_entire_file(fragment_path, context.temp_allocator)
-	if err2 != nil {
-		fmt.eprintfln("vertex shader read error: %s", err)
-		return shader, false
-	}
-
-	vertex_shader_id := shader_compile(gl.VERTEX_SHADER, string(vertex_shader_source))
-	fragment_shader_id := shader_compile(gl.FRAGMENT_SHADER, string(fragment_shader_source))
-
-	shader_program_id := gl.CreateProgram()
-	gl.AttachShader(shader_program_id, vertex_shader_id)
-	gl.AttachShader(shader_program_id, fragment_shader_id)
-	gl.LinkProgram(shader_program_id)
-	checkProgramLinking(shader_program_id)
-
-	gl.DeleteShader(vertex_shader_id)
-	gl.DeleteShader(fragment_shader_id)
-
-	shader.id = shader_program_id
-
-	return shader, true
-}
-
-shader_compile :: proc(shader_type: u32, shader_source: string) -> u32 {
-	shader_id := gl.CreateShader(shader_type)
-	shader_source_c := strings.clone_to_cstring(shader_source, context.temp_allocator)
-	gl.ShaderSource(shader_id, 1, &shader_source_c, nil)
-	gl.CompileShader(shader_id)
-	checkShaderCompilation(shader_id)
-
-	return shader_id
-}
-
-shader_use :: proc(shader: Shader) {
-	gl.UseProgram(shader.id)
-}
-
-shader_set_bool :: proc(shader: Shader, name: cstring, value: bool) {
-	location := gl.GetUniformLocation(shader.id, name)
-	gl.Uniform1i(location, i32(value))
-}
-
-shader_set_int :: proc(shader: Shader, name: cstring, value: i32) {
-	location := gl.GetUniformLocation(shader.id, name)
-	gl.Uniform1i(location, value)
-}
-
-shader_set_float :: proc(shader: Shader, name: cstring, value: f32) {
-	location := gl.GetUniformLocation(shader.id, name)
-	gl.Uniform1f(location, value)
-}
-
-checkShaderCompilation :: proc(shaderId: u32) {
-	success: i32
-	info: [512]u8
-
-	gl.GetShaderiv(shaderId, gl.COMPILE_STATUS, &success)
-
-	if success == 0 {
-		gl.GetShaderInfoLog(shaderId, 512, nil, raw_data(info[:]))
-		err := string(cstring(raw_data(info[:])))
-		log.error(err)
-	}
-}
-
-checkProgramLinking :: proc(shaderProgramId: u32) {
-	success: i32
-	info: [512]u8
-
-	gl.GetProgramiv(shaderProgramId, gl.LINK_STATUS, &success)
-
-	if success == 0 {
-		gl.GetProgramInfoLog(shaderProgramId, 512, nil, raw_data(info[:]))
-		err := string(cstring(raw_data(info[:])))
-		log.error(err)
-	}
 }
 
 

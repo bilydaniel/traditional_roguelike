@@ -36,16 +36,20 @@ Asset_id :: enum u32 {
 	floor,
 	demon,
 	wall,
+	arrow_full,
+	arrow_hollow,
 }
 
 Sprite_table :: [Asset_id]Sprite
 
 
 asset_positions := [Asset_id]u32 {
-	.player_1 = 1,
-	.floor    = 24832,
-	.demon    = 24077,
-	.wall     = 25600,
+	.player_1     = 1,
+	.floor        = 24832,
+	.demon        = 24077,
+	.wall         = 25600,
+	.arrow_full   = 7433,
+	.arrow_hollow = 7437,
 }
 
 build_sprite_table :: proc() -> [Asset_id]Sprite {
