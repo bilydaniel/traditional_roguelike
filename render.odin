@@ -165,18 +165,28 @@ draw_game_state :: proc(renderer: ^Renderer, game_state: ^Game_state) {
 
 
 	player_collider := get_entity_collider(player)
+
+	arrow_visual_offset :: 3 * math.PI / 4
+	arrow_visual_rotation := arrow_rotation + arrow_visual_offset
+
+
+	arrow_dir := la.Vector2f32{math.cos(arrow_rotation), math.sin(arrow_rotation)}
+	arrow_orbit: f32 = 20
+	player_collider_vec := la.Vector2f32{player_collider.x, player_collider.y}
+	arrow_center := player_collider_vec + arrow_dir * arrow_orbit
 	//TODO: how to rotate the asset?
 	arrow_rotation += 0.01
+	arrow_rotation = player.rotation
 	push_quad_rotated(
 		&renderer.vertices,
 		{
-			player_collider.x,
-			player_collider.y,
-			player_collider.x + TILE_W * TILE_SCALE,
-			player_collider.y + TILE_H * TILE_SCALE,
+			arrow_center.x - (TILE_W * TILE_SCALE / 2),
+			arrow_center.y - (TILE_H * TILE_SCALE / 2),
+			arrow_center.x + (TILE_W * TILE_SCALE / 2),
+			arrow_center.y + (TILE_H * TILE_SCALE / 2),
 		},
 		sprite_table[.arrow_full],
-		arrow_rotation,
+		arrow_visual_rotation,
 		{1.0, 1.0, 1.0, 1.0},
 	)
 
@@ -198,9 +208,12 @@ draw_game_state :: proc(renderer: ^Renderer, game_state: ^Game_state) {
 	// when do i apply scaling??
 	//TODO: doesent work with walls, works fine with entities
 
+	draw_colliders := false
 	for i: u32 = 0; i < entities.entity_count; i += 1 {
-		circle := get_entity_collider(&entities.entities[i])
-		push_circle(&renderer.vertices, {circle.x, circle.y}, circle.r, {1.0, 1.0, 1.0, 1.0})
+		if draw_colliders {
+			circle := get_entity_collider(&entities.entities[i])
+			push_circle(&renderer.vertices, {circle.x, circle.y}, circle.r, {1.0, 1.0, 1.0, 1.0})
+		}
 	}
 
 
@@ -352,8 +365,8 @@ push_quad_rotated :: proc(
 
 	x0, y0 := rotate_point(destination.x0, destination.y0, center, cos, sin)
 	x1, y1 := rotate_point(destination.x1, destination.y0, center, cos, sin)
-	x2, y2 := rotate_point(destination.x0, destination.y1, center, cos, sin)
-	x3, y3 := rotate_point(destination.x1, destination.y1, center, cos, sin)
+	x2, y2 := rotate_point(destination.x1, destination.y1, center, cos, sin)
+	x3, y3 := rotate_point(destination.x0, destination.y1, center, cos, sin)
 
 	destination_result: Rect_points = {x0, y0, x1, y1, x2, y2, x3, y3}
 	push_quad_points(vertices, destination_result, source, {1.0, 1.0, 1.0, 1.0})
