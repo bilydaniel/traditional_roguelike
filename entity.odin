@@ -176,15 +176,24 @@ get_entity_collider :: proc(entity: ^Entity) -> Circle {
 	return result
 }
 
+get_rect_center :: proc(rect: Rect) -> la.Vector2f32 {
+	rect_w := abs(rect.x1 - rect.x0)
+	rect_h := abs(rect.y1 - rect.y0)
+	rect_center := la.Vector2f32{rect.x0 + rect_w / 2, rect.y0 + rect_h / 2}
+	return rect_center
+}
+
 collide_aabb_circle :: proc(rect: Rect, circle: Circle) -> (la.Vector2f32, bool) {
 	hit: bool
 	push: la.Vector2f32
 
 	circle_center := la.Vector2f32{circle.x, circle.y}
-	rect_center := la.Vector2f32{rect.x + rect.w / 2, rect.y + rect.h / 2}
+	rect_w := abs(rect.x1 - rect.x0)
+	rect_h := abs(rect.y1 - rect.y0)
+	rect_center := la.Vector2f32{rect.x0 + rect_w / 2, rect.y0 + rect_h / 2}
 
 	d := circle_center - rect_center
-	aabb_half := la.Vector2f32{rect.w / 2, rect.h / 2}
+	aabb_half := la.Vector2f32{rect_w / 2, rect_h / 2}
 
 	clamped_x := clamp(d.x, -aabb_half.x, aabb_half.x)
 	clamped_y := clamp(d.y, -aabb_half.y, aabb_half.y)

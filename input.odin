@@ -35,11 +35,11 @@ input :: proc(window: glfw.WindowHandle, game_state: ^Game_state) {
 	}
 
 
-	if glfw.GetKey(window, glfw.KEY_KP_ADD) == glfw.PRESS {
+	if glfw.GetKey(window, glfw.KEY_Z) == glfw.PRESS {
 		game_state.camera.zoom += 0.1
 	}
 
-	if glfw.GetKey(window, glfw.KEY_KP_SUBTRACT) == glfw.PRESS {
+	if glfw.GetKey(window, glfw.KEY_X) == glfw.PRESS {
 		game_state.camera.zoom -= 0.1
 	}
 

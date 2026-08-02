@@ -27,11 +27,7 @@ physics :: proc(game_state: ^Game_state) {
 
 					push, hit := collide_aabb_circle(tile_collider, entity_collider)
 					if hit {
-						if entity.kind == .player {
-							fmt.printf("pushed_wall\n")
-							fmt.printf("push: %v\n", push)
-						}
-						player.pos += push
+						entity.pos += push
 					}
 				}
 			}
@@ -44,9 +40,6 @@ physics :: proc(game_state: ^Game_state) {
 
 					push, hit := collide_circle_circle(entity_1_collider, entity_2_collider)
 					if hit {
-						if entity.kind == .player {
-							fmt.printf("pushed_entity\n")
-						}
 						entity.pos += push / 2
 						entity_2.pos -= push / 2
 					}

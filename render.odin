@@ -3,6 +3,7 @@ package main
 import "base:runtime"
 import "core:fmt"
 import "core:log"
+import "core:math"
 import la "core:math/linalg"
 import "core:os"
 import "core:strings"
@@ -116,6 +117,100 @@ init_renderer :: proc() -> (renderer: Renderer, ok: bool) {
 	return
 }
 
+arrow_rotation: f32 = 0
+
+draw_game_state :: proc(renderer: ^Renderer, game_state: ^Game_state) {
+	window := renderer.window
+	entities := &game_state.entities
+	player_id := entities.player_id
+	player := get_entity(entities, player_id)
+	circle := get_entity_collider(player)
+
+	levels := game_state.levels
+	current_level_index := game_state.current_level
+	current_level := &levels[current_level_index]
+
+	draw_block := time_block(.draw)
+	w, h := glfw.GetFramebufferSize(window)
+	gl.Viewport(0, 0, w, h)
+	//gl.ClearColor(0.4, 0.04, 0.41, 1.0) // TODO: figure out a better color
+	gl.ClearColor(42 / 255, 42 / 255, 42 / 255, 1.0) // TODO: figure out a better color
+	gl.Clear(gl.COLOR_BUFFER_BIT) // uses the color to clear
+
+	player_center := player.pos + player.size * 0.5
+	camera := &game_state.camera
+	target := player_center - la.Vector2f32{f32(w), f32(h)} * 0.5 / camera.zoom
+	t := 1.0 - math.exp(-camera.smoothing * f32(game_state.dt))
+	camera.pos += (target - camera.pos) * t
+
+	gl.Uniform2f(renderer.u_res, f32(w), f32(h))
+	gl.Uniform1i(renderer.u_tex, 0)
+	gl.Uniform2f(renderer.u_cam, camera.pos.x, camera.pos.y)
+	gl.Uniform1f(renderer.u_zoom, camera.zoom)
+
+	gl.BindVertexArray(renderer.vao)
+
+
+	for tile, index in current_level.tiles {
+		push_quad_tile(&renderer.vertices, index, sprite_table[tile.asset_id], tile.color)
+	}
+
+	//TODO: figure out something smarter, iterator?
+	for i: u32 = 0; i < entities.entity_count; i += 1 {
+		entity := entities.entities[i]
+		if entity.kind != .nil {
+			push_quad_entity(&renderer.vertices, entity)
+		}
+	}
+
+
+	player_collider := get_entity_collider(player)
+	//TODO: how to rotate the asset?
+	arrow_rotation += 0.01
+	push_quad_rotated(
+		&renderer.vertices,
+		{
+			player_collider.x,
+			player_collider.y,
+			player_collider.x + TILE_W * TILE_SCALE,
+			player_collider.y + TILE_H * TILE_SCALE,
+		},
+		sprite_table[.arrow_full],
+		arrow_rotation,
+		{1.0, 1.0, 1.0, 1.0},
+	)
+
+	if !player.attacking {
+		push_slash_arc(
+			&renderer.vertices,
+			{player_collider.x, player_collider.y},
+			18,
+			40,
+			player.rotation,
+			math.PI * 0.6, // ~108° wide
+			[4]f32{1, 1, 1, 1 - t}, // white, fades out
+		)
+		player.attacking = true
+	}
+
+
+	//TODO: figure out the correct position and size of the collision circle, seems off
+	// when do i apply scaling??
+	//TODO: doesent work with walls, works fine with entities
+
+	for i: u32 = 0; i < entities.entity_count; i += 1 {
+		circle := get_entity_collider(&entities.entities[i])
+		push_circle(&renderer.vertices, {circle.x, circle.y}, circle.r, {1.0, 1.0, 1.0, 1.0})
+	}
+
+
+	//push_quad_entity(&vertices, player)
+	flush_batch(&renderer.vertices, renderer.vbo)
+	glfw.SwapBuffers(window)
+	block_end(draw_block)
+
+}
+
 Camera :: struct {
 	pos:       la.Vector2f32,
 	zoom:      f32,
@@ -220,3 +315,229 @@ checkProgramLinking :: proc(shaderProgramId: u32) {
 		log.error(err)
 	}
 }
+
+
+window_resize :: proc "cdecl" (window: glfw.WindowHandle, width: i32, height: i32) {
+	gl.Viewport(0, 0, width, height)
+}
+
+rotate_point :: proc(
+	point_x: f32,
+	point_y: f32,
+	center: la.Vector2f32,
+	cos: f32,
+	sin: f32,
+) -> (
+	rotated_x: f32,
+	rotated_y: f32,
+) {
+	point_x_origin := point_x - center[0]
+	point_y_origin := point_y - center[1]
+
+	rotated_x = center[0] + (point_x_origin * cos) - (point_y_origin * sin)
+	rotated_y = center[1] + (point_x_origin * sin) + (point_y_origin * cos)
+	return
+}
+
+push_quad_rotated :: proc(
+	vertices: ^[dynamic]f32,
+	destination: Rect,
+	source: Sprite,
+	rotation: f32,
+	color: [4]f32,
+) {
+	center := get_rect_center(destination)
+	sin := math.sin(rotation)
+	cos := math.cos(rotation)
+
+	x0, y0 := rotate_point(destination.x0, destination.y0, center, cos, sin)
+	x1, y1 := rotate_point(destination.x1, destination.y0, center, cos, sin)
+	x2, y2 := rotate_point(destination.x0, destination.y1, center, cos, sin)
+	x3, y3 := rotate_point(destination.x1, destination.y1, center, cos, sin)
+
+	destination_result: Rect_points = {x0, y0, x1, y1, x2, y2, x3, y3}
+	push_quad_points(vertices, destination_result, source, {1.0, 1.0, 1.0, 1.0})
+}
+
+
+push_quad_entity :: proc(vertices: ^[dynamic]f32, entity: Entity) {
+	destination := Rect {
+		x0 = entity.pos.x,
+		y0 = entity.pos.y,
+		x1 = entity.pos.x + entity.size.x,
+		y1 = entity.pos.y + entity.size.y,
+	}
+
+
+	id := entity.asset_id
+	source := sprite_table[id]
+
+	color := entity.color
+	push_quad(vertices, destination, source, color)
+}
+
+
+push_quad_tile :: proc(vertices: ^[dynamic]f32, index: int, sprite: Sprite, color: Color) {
+	tile_pos := get_tile_pos(u32(index))
+	pixel_pos := get_tile_pixel_pos(tile_pos)
+	destination := Rect {
+		x0 = f32(pixel_pos.x),
+		y0 = f32(pixel_pos.y),
+		x1 = f32(pixel_pos.x) + TILE_W * TILE_SCALE,
+		y1 = f32(pixel_pos.y) + TILE_H * TILE_SCALE,
+	}
+	push_quad(vertices, destination, sprite, color)
+}
+
+push_quad :: proc(vertices: ^[dynamic]f32, destination: Rect, source: Sprite, color: [4]f32) {
+	//TODO: probably come up with more efficient way of doing this, feels messy
+	x0, y0, x1, y1 := destination.x0, destination.y0, destination.x1, destination.y1
+	u0, v0, u1, v1 := source.u0, source.v0, source.u1, source.v1
+	//TODO: could be fun to make a gradient with two colors
+	r, g, b, a := color[0], color[1], color[2], color[3]
+
+	append(vertices, x0, y0, u0, v0, r, g, b, a)
+	append(vertices, x1, y0, u1, v0, r, g, b, a)
+	append(vertices, x1, y1, u1, v1, r, g, b, a)
+	append(vertices, x0, y0, u0, v0, r, g, b, a)
+	append(vertices, x1, y1, u1, v1, r, g, b, a)
+	append(vertices, x0, y1, u0, v1, r, g, b, a)
+}
+
+push_quad_points :: proc(
+	vertices: ^[dynamic]f32,
+	destination: Rect_points,
+	source: Sprite,
+	color: [4]f32,
+) {
+	x0, y0, x1, y1 := destination.x0, destination.y0, destination.x1, destination.y1
+	x2, y2, x3, y3 := destination.x2, destination.y2, destination.x3, destination.y3
+	u0, v0, u1, v1 := source.u0, source.v0, source.u1, source.v1
+	r, g, b, a := color[0], color[1], color[2], color[3]
+
+	append(vertices, x0, y0, u0, v0, r, g, b, a)
+	append(vertices, x1, y1, u1, v0, r, g, b, a)
+	append(vertices, x2, y2, u1, v1, r, g, b, a)
+	append(vertices, x0, y0, u0, v0, r, g, b, a)
+	append(vertices, x2, y2, u1, v1, r, g, b, a)
+	append(vertices, x3, y3, u0, v1, r, g, b, a)
+}
+
+flush_batch :: proc(vertices: ^[dynamic]f32, vbo: u32) {
+	if len(vertices) > 0 {
+		gl.BindBuffer(gl.ARRAY_BUFFER, vbo)
+		gl.BufferData(
+			gl.ARRAY_BUFFER,
+			len(vertices) * size_of(f32),
+			raw_data(vertices^),
+			gl.DYNAMIC_DRAW,
+		)
+		gl.DrawArrays(gl.TRIANGLES, 0, i32(len(vertices) / 8)) //TODO: change 4 to a variable
+		clear(vertices)
+	}
+}
+push_slash_arc :: proc(
+	vertices: ^[dynamic]f32,
+	center: la.Vector2f32,
+	inner_r, outer_r: f32,
+	facing_angle: f32,
+	arc_width: f32,
+	color: [4]f32,
+	segments: int = 10,
+) {
+	start_angle := facing_angle - arc_width / 2
+	step := arc_width / f32(segments)
+	r, g, b, a := color[0], color[1], color[2], color[3]
+
+	for i := 0; i < segments; i += 1 {
+		a0 := start_angle + step * f32(i)
+		a1 := start_angle + step * f32(i + 1)
+
+		d0 := la.Vector2f32{math.cos(a0), math.sin(a0)}
+		d1 := la.Vector2f32{math.cos(a1), math.sin(a1)}
+
+		in0, out0 := center + d0 * inner_r, center + d0 * outer_r
+		in1, out1 := center + d1 * inner_r, center + d1 * outer_r
+
+		append(vertices, in0.x, in0.y, -1, -1, r, g, b, a)
+		append(vertices, out0.x, out0.y, -1, -1, r, g, b, a)
+		append(vertices, out1.x, out1.y, -1, -1, r, g, b, a)
+		append(vertices, in0.x, in0.y, -1, -1, r, g, b, a)
+		append(vertices, out1.x, out1.y, -1, -1, r, g, b, a)
+		append(vertices, in1.x, in1.y, -1, -1, r, g, b, a)
+	}
+}
+
+push_circle :: proc(
+	vertices: ^[dynamic]f32,
+	center: la.Vector2f32,
+	radius: f32,
+	color: [4]f32,
+	segments: int = 32,
+) {
+	step := (math.PI * 2) / f32(segments)
+	r, g, b, a := color[0], color[1], color[2], color[3]
+
+	for i := 0; i < segments; i += 1 {
+		a0 := step * f32(i)
+		a1 := step * f32(i + 1)
+
+		p0 := center + la.Vector2f32{math.cos(a0), math.sin(a0)} * radius
+		p1 := center + la.Vector2f32{math.cos(a1), math.sin(a1)} * radius
+
+		append(vertices, center.x, center.y, -1, -1, r, g, b, a)
+		append(vertices, p0.x, p0.y, -1, -1, r, g, b, a)
+		append(vertices, p1.x, p1.y, -1, -1, r, g, b, a)
+	}
+}
+
+push_ring :: proc(
+	vertices: ^[dynamic]f32,
+	center: la.Vector2f32,
+	inner_r, outer_r: f32,
+	color: [4]f32,
+	segments: int = 32,
+) {
+	step := (math.PI * 2) / f32(segments)
+	r, g, b, a := color[0], color[1], color[2], color[3]
+
+	for i := 0; i < segments; i += 1 {
+		a0 := step * f32(i)
+		a1 := step * f32(i + 1)
+
+		d0 := la.Vector2f32{math.cos(a0), math.sin(a0)}
+		d1 := la.Vector2f32{math.cos(a1), math.sin(a1)}
+
+		in0, out0 := center + d0 * inner_r, center + d0 * outer_r
+		in1, out1 := center + d1 * inner_r, center + d1 * outer_r
+
+		append(vertices, in0.x, in0.y, -1, -1, r, g, b, a)
+		append(vertices, out0.x, out0.y, -1, -1, r, g, b, a)
+		append(vertices, out1.x, out1.y, -1, -1, r, g, b, a)
+		append(vertices, in0.x, in0.y, -1, -1, r, g, b, a)
+		append(vertices, out1.x, out1.y, -1, -1, r, g, b, a)
+		append(vertices, in1.x, in1.y, -1, -1, r, g, b, a)
+	}
+}
+//TODO: @finish
+// try_attack_hit :: proc(player: Entity, enemies: []Entity, outer_r: f32, arc_width: f32) {
+// 	for &enemy in enemies {
+// 		to_enemy := enemy.pos - player.pos
+// 		dist := la.length(to_enemy)
+// 		if dist > outer_r + enemy.collider.r do continue // out of range
+//
+// 		angle_to_enemy := math.atan2(to_enemy.y, to_enemy.x)
+// 		diff := angle_diff(player.facing_angle, angle_to_enemy)
+// 		if abs(diff) <= arc_width / 2 {
+// 			apply_damage(&enemy, player.attack_damage)
+// 		}
+// 	}
+// }
+//
+// // shortest signed distance between two angles, handles wraparound at +-PI
+// angle_diff :: proc(a, b: f32) -> f32 {
+// 	d := b - a
+// 	for d > math.PI {d -= math.PI * 2}
+// 	for d < -math.PI {d += math.PI * 2}
+// 	return d
+// }

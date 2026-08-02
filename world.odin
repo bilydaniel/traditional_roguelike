@@ -16,10 +16,10 @@ get_tile_collider :: proc(index: u32) -> Rect {
 	pixel_pos := get_tile_pixel_pos(tile_pos)
 
 	return Rect {
-		x = f32(pixel_pos[0]),
-		y = f32(pixel_pos[1]),
-		w = f32(TILE_W * TILE_SCALE),
-		h = f32(TILE_H * TILE_SCALE),
+		x0 = f32(pixel_pos[0]),
+		y0 = f32(pixel_pos[1]),
+		x1 = f32(pixel_pos[0] + TILE_W * TILE_SCALE),
+		y1 = f32(pixel_pos[1] + TILE_H * TILE_SCALE),
 	}
 }
 
