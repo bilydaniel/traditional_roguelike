@@ -20,10 +20,14 @@ physics :: proc(game_state: ^Game_state) {
 		for i: u32 = 0; i < game_state.entities.entity_count; i += 1 {
 			entity := &game_state.entities.entities[i]
 			if entity.id != player.id {
-				dist := abs(la.distance(entity.collider_pos, player.collider_pos))
+				player_collider := get_entity_collider(player)
+				entity_collider := get_entity_collider(entity)
+				player_collider_pos := la.Vector2f32{player_collider.x, player_collider.y}
+				entity_collider_pos := la.Vector2f32{entity_collider.x, entity_collider.y}
+				dist := abs(la.distance(entity_collider_pos, player_collider_pos))
 				dist -= (entity.collider_r + player.collider_r)
 				if dist <= player.attack_range {
-					player_entity_vec := entity.pos - player.pos
+					player_entity_vec := entity_collider_pos - player_collider_pos
 					player_entity_angle := math.atan2(player_entity_vec.y, player_entity_vec.x)
 					start_attack_angle := player.rotation - player.attack_angle / 2
 					end_attack_angle := player.rotation + player.attack_angle / 2

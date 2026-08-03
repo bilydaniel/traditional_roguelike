@@ -195,8 +195,8 @@ draw_game_state :: proc(renderer: ^Renderer, game_state: ^Game_state) {
 		push_slash_arc(
 			&renderer.vertices,
 			{player_collider.x, player_collider.y},
-			18,
-			player.attack_range,
+			18 * TILE_SCALE, //TODO: @fix no idea if i should scale or not
+			player.attack_range * TILE_SCALE,
 			player.rotation,
 			player.attack_angle,
 			[4]f32{1, 1, 1, 1 - t}, // white, fades out
@@ -466,6 +466,7 @@ push_slash_arc :: proc(
 	for i := 0; i < segments; i += 1 {
 		a0 := start_angle + step * f32(i)
 		a1 := start_angle + step * f32(i + 1)
+
 
 		d0 := la.Vector2f32{math.cos(a0), math.sin(a0)}
 		d1 := la.Vector2f32{math.cos(a1), math.sin(a1)}
