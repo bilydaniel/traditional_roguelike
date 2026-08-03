@@ -13,6 +13,7 @@ import stbi "vendor:stb/image"
 
 TARGET_FPS :: 144
 FRAME_TIME :: 1.0 / TARGET_FPS
+VIRTUAL_HEIGHT :: 240 //TODO: figure out the value
 
 Renderer :: struct {
 	window:   glfw.WindowHandle,
@@ -140,7 +141,9 @@ draw_game_state :: proc(renderer: ^Renderer, game_state: ^Game_state) {
 	//gl.Clear(gl.DEPTH_BUFFER_BIT)
 
 	player_center := player.pos + player.size * 0.5
-	camera := &game_state.camera
+	camera := renderer.camera
+
+	camera.zoom = f32(h / VIRTUAL_HEIGHT)
 	target := player_center - la.Vector2f32{f32(w), f32(h)} * 0.5 / camera.zoom
 	t := 1.0 - math.exp(-camera.smoothing * f32(game_state.dt))
 	camera.pos += (target - camera.pos) * t
@@ -180,10 +183,10 @@ draw_game_state :: proc(renderer: ^Renderer, game_state: ^Game_state) {
 	push_quad_rotated(
 		&renderer.vertices,
 		{
-			arrow_center.x - (TILE_W * TILE_SCALE / 2),
-			arrow_center.y - (TILE_H * TILE_SCALE / 2),
-			arrow_center.x + (TILE_W * TILE_SCALE / 2),
-			arrow_center.y + (TILE_H * TILE_SCALE / 2),
+			arrow_center.x - (TILE_W / 2),
+			arrow_center.y - (TILE_H / 2),
+			arrow_center.x + (TILE_W / 2),
+			arrow_center.y + (TILE_H / 2),
 		},
 		sprite_table[.arrow_full],
 		arrow_visual_rotation,
@@ -195,8 +198,8 @@ draw_game_state :: proc(renderer: ^Renderer, game_state: ^Game_state) {
 		push_slash_arc(
 			&renderer.vertices,
 			{player_collider.x, player_collider.y},
-			18 * TILE_SCALE, //TODO: @fix no idea if i should scale or not
-			player.attack_range * TILE_SCALE,
+			18, //TODO: @fix no idea if i should scale or not
+			player.attack_range,
 			player.rotation,
 			player.attack_angle,
 			[4]f32{1, 1, 1, 1 - t}, // white, fades out
@@ -397,8 +400,8 @@ push_quad_tile :: proc(vertices: ^[dynamic]f32, index: int, sprite: Sprite, colo
 	destination := Rect {
 		x0 = f32(pixel_pos.x),
 		y0 = f32(pixel_pos.y),
-		x1 = f32(pixel_pos.x) + TILE_W * TILE_SCALE,
-		y1 = f32(pixel_pos.y) + TILE_H * TILE_SCALE,
+		x1 = f32(pixel_pos.x) + TILE_W,
+		y1 = f32(pixel_pos.y) + TILE_H,
 	}
 	push_quad(vertices, destination, sprite, color)
 }

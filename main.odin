@@ -37,7 +37,6 @@ Game_state :: struct {
 	current_level: u32,
 	entities:      Entities,
 	entity_map:    map[u32]u32,
-	camera:        Camera,
 	dt:            f64,
 }
 
@@ -63,10 +62,6 @@ game_state_init :: proc() -> ^Game_state {
 		}
 	}
 
-	camera := Camera{}
-	camera.zoom = 1.0
-	camera.smoothing = 5.0
-	game_state.camera = camera
 
 	sprite_table = build_sprite_table()
 
@@ -114,7 +109,7 @@ main :: proc() {
 
 		window := renderer.window
 
-		input(window, game_state)
+		input(window, game_state, &renderer)
 
 		ai(game_state)
 

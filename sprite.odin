@@ -2,7 +2,6 @@ package main
 
 TILE_W :: 16
 TILE_H :: 24
-TILE_SCALE :: 3
 
 TILESET_W :: 4096
 TILESET_H :: 4080

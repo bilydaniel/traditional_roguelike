@@ -3,7 +3,7 @@ import "core:math"
 import la "core:math/linalg"
 import "vendor:glfw"
 
-input :: proc(window: glfw.WindowHandle, game_state: ^Game_state) {
+input :: proc(window: glfw.WindowHandle, game_state: ^Game_state, renderer: ^Renderer) {
 	entities := &game_state.entities
 	player_id := entities.player_id
 	player := get_entity(entities, player_id)
@@ -33,15 +33,15 @@ input :: proc(window: glfw.WindowHandle, game_state: ^Game_state) {
 
 
 	if glfw.GetKey(window, glfw.KEY_Z) == glfw.PRESS {
-		game_state.camera.zoom += 0.1
+		renderer.camera.zoom += 0.1
 	}
 
 	if glfw.GetKey(window, glfw.KEY_X) == glfw.PRESS {
-		game_state.camera.zoom -= 0.1
+		renderer.camera.zoom -= 0.1
 	}
 
 	mouse_screen_x, mouse_screen_y := glfw.GetCursorPos(window)
-	mouse_x, mouse_y := apply_camera(game_state.camera, f32(mouse_screen_x), f32(mouse_screen_y))
+	mouse_x, mouse_y := apply_camera(renderer.camera, f32(mouse_screen_x), f32(mouse_screen_y))
 	mouse_vec := la.Vector2f32{mouse_x, mouse_y}
 	facing_vec := mouse_vec - player.pos
 	theta := math.atan2(facing_vec.y, facing_vec.x)
