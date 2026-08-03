@@ -141,7 +141,7 @@ draw_game_state :: proc(renderer: ^Renderer, game_state: ^Game_state) {
 	//gl.Clear(gl.DEPTH_BUFFER_BIT)
 
 	player_center := player.pos + player.size * 0.5
-	camera := renderer.camera
+	camera := &renderer.camera
 
 	camera.zoom = f32(h / VIRTUAL_HEIGHT)
 	target := player_center - la.Vector2f32{f32(w), f32(h)} * 0.5 / camera.zoom
