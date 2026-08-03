@@ -40,6 +40,10 @@ input :: proc(window: glfw.WindowHandle, game_state: ^Game_state, renderer: ^Ren
 		renderer.camera.zoom -= 0.1
 	}
 
+	if glfw.GetKey(window, glfw.KEY_C) == glfw.PRESS {
+		renderer.camera.manual = true
+	}
+
 	mouse_screen_x, mouse_screen_y := glfw.GetCursorPos(window)
 	mouse_x, mouse_y := apply_camera(renderer.camera, f32(mouse_screen_x), f32(mouse_screen_y))
 	mouse_vec := la.Vector2f32{mouse_x, mouse_y}

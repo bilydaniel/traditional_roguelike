@@ -62,7 +62,6 @@ game_state_init :: proc() -> ^Game_state {
 		}
 	}
 
-
 	sprite_table = build_sprite_table()
 
 	spawn_entities(&game_state.entities)

@@ -66,7 +66,7 @@ init_renderer :: proc() -> (renderer: Renderer, ok: bool) {
 	gl.BindBuffer(gl.ARRAY_BUFFER, vbo)
 	renderer.vbo = vbo
 
-	vertex_attrib_floats := 8
+	vertex_attrib_floats := 9
 	stride := i32(vertex_attrib_floats * size_of(f32))
 	gl.VertexAttribPointer(0, 2, gl.FLOAT, gl.FALSE, stride, uintptr(0))
 	gl.EnableVertexAttribArray(0) // aPos
@@ -74,6 +74,8 @@ init_renderer :: proc() -> (renderer: Renderer, ok: bool) {
 	gl.EnableVertexAttribArray(1)
 	gl.VertexAttribPointer(2, 4, gl.FLOAT, gl.FALSE, stride, uintptr(4 * size_of(f32))) // aColor
 	gl.EnableVertexAttribArray(2)
+	gl.VertexAttribPointer(3, 1, gl.FLOAT, gl.FALSE, stride, uintptr(8 * size_of(f32))) // aDepth
+	gl.EnableVertexAttribArray(3)
 
 	shader_program, shader_ok := shader_make("shader.vert", "shader.frag")
 	if !shader_ok {
@@ -104,7 +106,7 @@ init_renderer :: proc() -> (renderer: Renderer, ok: bool) {
 
 	gl.Enable(gl.BLEND)
 	gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
-	//gl.Enable(gl.DEPTH_TEST)
+	gl.Enable(gl.DEPTH_TEST)
 
 	gl.ActiveTexture(gl.TEXTURE0)
 	gl.BindTexture(gl.TEXTURE_2D, texture)
@@ -114,6 +116,10 @@ init_renderer :: proc() -> (renderer: Renderer, ok: bool) {
 
 	renderer.u_cam = gl.GetUniformLocation(shader_program.id, "uCam")
 	renderer.u_zoom = gl.GetUniformLocation(shader_program.id, "uZoom")
+
+	renderer.camera.zoom = 1.0
+	renderer.camera.smoothing = 5.0
+	renderer.camera.manual = false
 
 	ok = true
 	return
@@ -138,12 +144,14 @@ draw_game_state :: proc(renderer: ^Renderer, game_state: ^Game_state) {
 	//gl.ClearColor(0.4, 0.04, 0.41, 1.0) // TODO: figure out a better color
 	gl.ClearColor(42 / 255, 42 / 255, 42 / 255, 1.0) // TODO: figure out a better color
 	gl.Clear(gl.COLOR_BUFFER_BIT) // uses the color to clear
-	//gl.Clear(gl.DEPTH_BUFFER_BIT)
+	gl.Clear(gl.DEPTH_BUFFER_BIT)
 
 	player_center := player.pos + player.size * 0.5
 	camera := &renderer.camera
 
-	camera.zoom = f32(h / VIRTUAL_HEIGHT)
+	if !camera.manual {
+		camera.zoom = f32(h) / f32(VIRTUAL_HEIGHT)
+	}
 	target := player_center - la.Vector2f32{f32(w), f32(h)} * 0.5 / camera.zoom
 	t := 1.0 - math.exp(-camera.smoothing * f32(game_state.dt))
 	camera.pos += (target - camera.pos) * t
@@ -232,6 +240,7 @@ Camera :: struct {
 	pos:       la.Vector2f32,
 	zoom:      f32,
 	smoothing: f32,
+	manual:    bool,
 }
 
 apply_camera :: proc(camera: Camera, x_in: f32, y_in: f32) -> (x_out: f32, y_out: f32) {
@@ -373,7 +382,7 @@ push_quad_rotated :: proc(
 	x3, y3 := rotate_point(destination.x0, destination.y1, center, cos, sin)
 
 	destination_result: Rect_points = {x0, y0, x1, y1, x2, y2, x3, y3}
-	push_quad_points(vertices, destination_result, source, {1.0, 1.0, 1.0, 1.0})
+	push_quad_points(vertices, destination_result, -1.0, source, {1.0, 1.0, 1.0, 1.0})
 }
 
 
@@ -388,42 +397,53 @@ push_quad_entity :: proc(vertices: ^[dynamic]f32, entity: Entity) {
 
 	id := entity.asset_id
 	source := sprite_table[id]
+	depth := entity.pos.y + entity.size.y
 
 	color := entity.color
-	push_quad(vertices, destination, source, color)
+	push_quad(vertices, destination, depth, source, color)
 }
 
 
 push_quad_tile :: proc(vertices: ^[dynamic]f32, index: int, sprite: Sprite, color: Color) {
 	tile_pos := get_tile_pos(u32(index))
 	pixel_pos := get_tile_pixel_pos(tile_pos)
+	depth: f32 = f32(pixel_pos.y + TILE_H)
 	destination := Rect {
 		x0 = f32(pixel_pos.x),
 		y0 = f32(pixel_pos.y),
 		x1 = f32(pixel_pos.x) + TILE_W,
 		y1 = f32(pixel_pos.y) + TILE_H,
 	}
-	push_quad(vertices, destination, sprite, color)
+	push_quad(vertices, destination, depth, sprite, color)
 }
 
-push_quad :: proc(vertices: ^[dynamic]f32, destination: Rect, source: Sprite, color: [4]f32) {
+push_quad :: proc(
+	vertices: ^[dynamic]f32,
+	destination: Rect,
+	depth: f32,
+	source: Sprite,
+	color: [4]f32,
+) {
 	//TODO: probably come up with more efficient way of doing this, feels messy
 	x0, y0, x1, y1 := destination.x0, destination.y0, destination.x1, destination.y1
 	u0, v0, u1, v1 := source.u0, source.v0, source.u1, source.v1
 	//TODO: could be fun to make a gradient with two colors
 	r, g, b, a := color[0], color[1], color[2], color[3]
 
-	append(vertices, x0, y0, u0, v0, r, g, b, a)
-	append(vertices, x1, y0, u1, v0, r, g, b, a)
-	append(vertices, x1, y1, u1, v1, r, g, b, a)
-	append(vertices, x0, y0, u0, v0, r, g, b, a)
-	append(vertices, x1, y1, u1, v1, r, g, b, a)
-	append(vertices, x0, y1, u0, v1, r, g, b, a)
+	d := depth
+
+	append(vertices, x0, y0, u0, v0, r, g, b, a, d)
+	append(vertices, x1, y0, u1, v0, r, g, b, a, d)
+	append(vertices, x1, y1, u1, v1, r, g, b, a, d)
+	append(vertices, x0, y0, u0, v0, r, g, b, a, d)
+	append(vertices, x1, y1, u1, v1, r, g, b, a, d)
+	append(vertices, x0, y1, u0, v1, r, g, b, a, d)
 }
 
 push_quad_points :: proc(
 	vertices: ^[dynamic]f32,
 	destination: Rect_points,
+	depth: f32,
 	source: Sprite,
 	color: [4]f32,
 ) {
@@ -431,13 +451,14 @@ push_quad_points :: proc(
 	x2, y2, x3, y3 := destination.x2, destination.y2, destination.x3, destination.y3
 	u0, v0, u1, v1 := source.u0, source.v0, source.u1, source.v1
 	r, g, b, a := color[0], color[1], color[2], color[3]
+	d := depth
 
-	append(vertices, x0, y0, u0, v0, r, g, b, a)
-	append(vertices, x1, y1, u1, v0, r, g, b, a)
-	append(vertices, x2, y2, u1, v1, r, g, b, a)
-	append(vertices, x0, y0, u0, v0, r, g, b, a)
-	append(vertices, x2, y2, u1, v1, r, g, b, a)
-	append(vertices, x3, y3, u0, v1, r, g, b, a)
+	append(vertices, x0, y0, u0, v0, r, g, b, a, d)
+	append(vertices, x1, y1, u1, v0, r, g, b, a, d)
+	append(vertices, x2, y2, u1, v1, r, g, b, a, d)
+	append(vertices, x0, y0, u0, v0, r, g, b, a, d)
+	append(vertices, x2, y2, u1, v1, r, g, b, a, d)
+	append(vertices, x3, y3, u0, v1, r, g, b, a, d)
 }
 
 flush_batch :: proc(vertices: ^[dynamic]f32, vbo: u32) {

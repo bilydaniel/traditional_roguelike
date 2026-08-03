@@ -123,7 +123,7 @@ spawn_entities :: proc(entities: ^Entities) {
 
 	player.pos = la.Vector2f32{100, 100}
 	player.size = la.Vector2f32{TILE_W, TILE_H}
-	player.speed = 200
+	player.speed = 100
 	player.asset_id = .player_1
 	player.color = [4]f32{0.8, 0.3, 0.8, 1.0}
 	player.collider_pos.x = player.size.x / 2
@@ -148,7 +148,7 @@ spawn_entities :: proc(entities: ^Entities) {
 
 		entity.pos = la.Vector2f32{f32(i * 50), f32(i * 50)}
 		entity.size = la.Vector2f32{TILE_W, TILE_H}
-		entity.speed = 200
+		entity.speed = 100
 		entity.asset_id = .demon
 		entity.color = [4]f32{0.8, 0.0, 0.0, 1.0}
 		entity.collider_pos.x = entity.size.x / 2
