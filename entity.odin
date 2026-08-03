@@ -1,5 +1,6 @@
 package main
 import "core:log"
+import "core:math"
 import la "core:math/linalg"
 
 MAX_ENTITIES :: 4096
@@ -32,19 +33,22 @@ Kind :: enum {
 	enemy,
 }
 Entity :: struct {
-	id:           Entity_id, // not sure if needed
-	kind:         Kind,
-	pos:          la.Vector2f32,
-	vel:          la.Vector2f32,
-	rotation:     f32,
-	size:         la.Vector2f32,
-	speed:        f32,
-	asset_id:     Asset_id,
-	color:        [4]f32,
+	id:               Entity_id, // not sure if needed
+	kind:             Kind,
+	pos:              la.Vector2f32,
+	vel:              la.Vector2f32,
+	rotation:         f32,
+	size:             la.Vector2f32,
+	speed:            f32,
+	asset_id:         Asset_id,
+	color:            [4]f32,
 	//TODO: @finish, figure out the position and size of the collider in aseprite
-	collider_pos: la.Vector2f32, // relative to pos
-	collider_r:   f32,
-	attacking:    bool,
+	collider_pos:     la.Vector2f32, // relative to pos
+	collider_r:       f32,
+	attacking:        bool,
+	attack_animation: bool,
+	attack_range:     f32,
+	attack_angle:     f32,
 }
 
 create_entity :: proc(entities: ^Entities, kind: Kind) -> Entity_id {
@@ -125,6 +129,8 @@ spawn_entities :: proc(entities: ^Entities) {
 	player.collider_pos.x = player.size.x / 2
 	player.collider_pos.y = player.size.y - 15
 	player.collider_r = 6 * TILE_SCALE
+	player.attack_range = 40
+	player.attack_angle = math.PI * 0.6
 
 	entity1: Entity_id
 	entity2: Entity_id

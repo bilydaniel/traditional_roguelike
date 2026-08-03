@@ -26,12 +26,9 @@ input :: proc(window: glfw.WindowHandle, game_state: ^Game_state) {
 		movement.x += 1
 	}
 
-	if glfw.GetKey(window, glfw.KEY_UP) == glfw.PRESS {
-		player.attacking = false
-	}
-
 	if glfw.GetMouseButton(window, glfw.MOUSE_BUTTON_1) == glfw.PRESS {
-		player.attacking = false
+		player.attacking = true
+		player.attack_animation = true
 	}
 
 

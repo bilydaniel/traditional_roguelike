@@ -15,6 +15,7 @@ void main() {
     vec2 screen = (aPos - uCam) * uZoom;
     vec2 ndc = (screen / uResolution) * 2.0 - 1.0; // 0 -> 1
     ndc.y = -ndc.y;
+    //gl_Position = vec4(ndc, 0.0, 1.0);
     gl_Position = vec4(ndc, 0.0, 1.0);
     vTexCoord = aTexCoord;
     vColor = aColor;

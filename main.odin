@@ -13,7 +13,6 @@ import gl "vendor:OpenGL"
 import "vendor:glfw"
 
 //TODO:
-// profile the entity dereference, is hashing slow?
 // combat - basics to figure out if its fun, how much polish ads to the fun?
 // fov
 // level generation
@@ -63,7 +62,6 @@ game_state_init :: proc() -> ^Game_state {
 			}
 		}
 	}
-
 
 	camera := Camera{}
 	camera.zoom = 1.0

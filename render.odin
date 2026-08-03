@@ -103,6 +103,7 @@ init_renderer :: proc() -> (renderer: Renderer, ok: bool) {
 
 	gl.Enable(gl.BLEND)
 	gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
+	//gl.Enable(gl.DEPTH_TEST)
 
 	gl.ActiveTexture(gl.TEXTURE0)
 	gl.BindTexture(gl.TEXTURE_2D, texture)
@@ -136,6 +137,7 @@ draw_game_state :: proc(renderer: ^Renderer, game_state: ^Game_state) {
 	//gl.ClearColor(0.4, 0.04, 0.41, 1.0) // TODO: figure out a better color
 	gl.ClearColor(42 / 255, 42 / 255, 42 / 255, 1.0) // TODO: figure out a better color
 	gl.Clear(gl.COLOR_BUFFER_BIT) // uses the color to clear
+	//gl.Clear(gl.DEPTH_BUFFER_BIT)
 
 	player_center := player.pos + player.size * 0.5
 	camera := &game_state.camera
@@ -149,7 +151,6 @@ draw_game_state :: proc(renderer: ^Renderer, game_state: ^Game_state) {
 	gl.Uniform1f(renderer.u_zoom, camera.zoom)
 
 	gl.BindVertexArray(renderer.vao)
-
 
 	for tile, index in current_level.tiles {
 		push_quad_tile(&renderer.vertices, index, sprite_table[tile.asset_id], tile.color)
@@ -168,7 +169,6 @@ draw_game_state :: proc(renderer: ^Renderer, game_state: ^Game_state) {
 
 	arrow_visual_offset :: 3 * math.PI / 4
 	arrow_visual_rotation := arrow_rotation + arrow_visual_offset
-
 
 	arrow_dir := la.Vector2f32{math.cos(arrow_rotation), math.sin(arrow_rotation)}
 	arrow_orbit: f32 = 20
@@ -190,17 +190,18 @@ draw_game_state :: proc(renderer: ^Renderer, game_state: ^Game_state) {
 		{1.0, 1.0, 1.0, 1.0},
 	)
 
-	if !player.attacking {
+	if player.attack_animation {
+		//TODO: is attack_range taking scale into account?
 		push_slash_arc(
 			&renderer.vertices,
 			{player_collider.x, player_collider.y},
 			18,
-			40,
+			player.attack_range,
 			player.rotation,
-			math.PI * 0.6, // ~108° wide
+			player.attack_angle,
 			[4]f32{1, 1, 1, 1 - t}, // white, fades out
 		)
-		player.attacking = true
+		player.attack_animation = false
 	}
 
 
@@ -208,7 +209,7 @@ draw_game_state :: proc(renderer: ^Renderer, game_state: ^Game_state) {
 	// when do i apply scaling??
 	//TODO: doesent work with walls, works fine with entities
 
-	draw_colliders := false
+	draw_colliders := true
 	for i: u32 = 0; i < entities.entity_count; i += 1 {
 		if draw_colliders {
 			circle := get_entity_collider(&entities.entities[i])
