@@ -4,14 +4,17 @@ in vec4 vColor;
 out vec4 FragColor;
 uniform sampler2D uTexture;
 void main() {
+    vec4 color;
     // depth buffer fix
-    // if (vColor.a < 0.01) {
-    //     discard;
-    // }
     //FragColor = texture(uTexture, vTexCoord) * vColor;
     if (vTexCoord.x < 0.0) {
-        FragColor = vColor;
+        color = vColor;
     } else {
-        FragColor = texture(uTexture, vTexCoord) * vColor;
+        color = texture(uTexture, vTexCoord) * vColor;
     }
+
+    if (color.a < 0.01) {
+        discard;
+    }
+    FragColor = color;
 }

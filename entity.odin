@@ -1,4 +1,5 @@
 package main
+import "core:fmt"
 import "core:log"
 import "core:math"
 import la "core:math/linalg"
@@ -19,6 +20,29 @@ Entities :: struct {
 	player_id:      Entity_id,
 }
 
+Entity :: struct {
+	id:                  Entity_id, // not sure if needed
+	kind:                Kind,
+	pos:                 la.Vector2f32,
+	vel:                 la.Vector2f32,
+	rotation:            f32,
+	size:                la.Vector2f32,
+	speed:               f32,
+	asset_id:            Asset_id,
+	color:               [4]f32,
+	//TODO: @finish, figure out the position and size of the collider in aseprite
+	collider_pos:        la.Vector2f32, // relative to pos
+	collider_r:          f32,
+	attacking:           bool,
+	attack_animation:    f32,
+	attack_range:        f32,
+	attack_angle:        f32,
+	attack_cooldown:     f32,
+	attack_cooldown_max: f32,
+	hp:                  f32,
+	attack:              f32,
+}
+
 init_entities :: proc(entities: ^Entities) {
 	entities.id_map = make(Entity_map, MAX_ENTITIES)
 
@@ -31,24 +55,6 @@ Kind :: enum {
 	nil,
 	player,
 	enemy,
-}
-Entity :: struct {
-	id:               Entity_id, // not sure if needed
-	kind:             Kind,
-	pos:              la.Vector2f32,
-	vel:              la.Vector2f32,
-	rotation:         f32,
-	size:             la.Vector2f32,
-	speed:            f32,
-	asset_id:         Asset_id,
-	color:            [4]f32,
-	//TODO: @finish, figure out the position and size of the collider in aseprite
-	collider_pos:     la.Vector2f32, // relative to pos
-	collider_r:       f32,
-	attacking:        bool,
-	attack_animation: bool,
-	attack_range:     f32,
-	attack_angle:     f32,
 }
 
 create_entity :: proc(entities: ^Entities, kind: Kind) -> Entity_id {
@@ -108,7 +114,7 @@ remove_entity :: proc(entities: ^Entities, id: Entity_id) {
 			swapped_entity := entities.entities[swapped_index]
 			entities.entities[index] = swapped_entity
 
-			entities.id_map[swapped_entity.id] = id
+			entities.id_map[swapped_entity.id] = index
 
 			entities.entities[swapped_index] = {}
 			entities.entity_count -= 1
@@ -127,10 +133,14 @@ spawn_entities :: proc(entities: ^Entities) {
 	player.asset_id = .player_1
 	player.color = [4]f32{0.8, 0.3, 0.8, 1.0}
 	player.collider_pos.x = player.size.x / 2
-	player.collider_pos.y = player.size.y - 15
+	player.collider_pos.y = player.size.y - 6
 	player.collider_r = 6
 	player.attack_range = 40
 	player.attack_angle = math.PI * 0.6
+	player.attack_cooldown = 0.0
+	player.attack_cooldown_max = 1.0
+	player.hp = 30
+	player.attack = 10
 
 	entity1: Entity_id
 	entity2: Entity_id
@@ -152,22 +162,14 @@ spawn_entities :: proc(entities: ^Entities) {
 		entity.asset_id = .demon
 		entity.color = [4]f32{0.8, 0.0, 0.0, 1.0}
 		entity.collider_pos.x = entity.size.x / 2
-		entity.collider_pos.y = entity.size.y - 15
+		entity.collider_pos.y = entity.size.y - 6
 		entity.collider_r = 6
+		entity.hp = 20
+		entity.attack = 5
 	}
 
 	remove_entity(entities, entity1)
 	remove_entity(entities, entity2)
-
-	entity_id := create_entity(entities, .enemy)
-	entity := get_entity(entities, entity_id)
-
-	entity.pos = la.Vector2f32{f32(2 * 50), f32(2 * 50)}
-	entity.size = la.Vector2f32{TILE_W, TILE_H}
-	entity.speed = 200
-	entity.asset_id = .demon
-	entity.color = [4]f32{0.8, 0.0, 0.0, 1.0}
-
 }
 
 get_entity_collider :: proc(entity: ^Entity) -> Circle {

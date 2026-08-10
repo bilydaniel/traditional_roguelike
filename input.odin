@@ -3,10 +3,21 @@ import "core:math"
 import la "core:math/linalg"
 import "vendor:glfw"
 
+cooldown :: proc(value: ^f32, dt: f32) {
+	value^ -= dt
+	if value^ < 0 {
+		value^ = 0
+	}
+}
+
 input :: proc(window: glfw.WindowHandle, game_state: ^Game_state, renderer: ^Renderer) {
 	entities := &game_state.entities
 	player_id := entities.player_id
 	player := get_entity(entities, player_id)
+	dt := game_state.dt
+
+
+	cooldown(&player.attack_cooldown, f32(dt))
 
 	if glfw.GetKey(window, glfw.KEY_ESCAPE) == glfw.PRESS {
 		glfw.SetWindowShouldClose(window, true)
@@ -27,8 +38,13 @@ input :: proc(window: glfw.WindowHandle, game_state: ^Game_state, renderer: ^Ren
 	}
 
 	if glfw.GetMouseButton(window, glfw.MOUSE_BUTTON_1) == glfw.PRESS {
-		player.attacking = true
-		player.attack_animation = true
+		if player.attack_cooldown <= 0 {
+			player.attacking = true
+			player.attack_animation = 0.2
+			player.attack_cooldown = player.attack_cooldown_max
+			//TODO: make more generic, just player attack for now
+			particle_burst(game_state, player.pos)
+		}
 	}
 
 
@@ -55,5 +71,5 @@ input :: proc(window: glfw.WindowHandle, game_state: ^Game_state, renderer: ^Ren
 		movement = la.normalize(movement)
 	}
 
-	player.vel = movement * player.speed * f32(game_state.dt)
+	player.vel = movement * player.speed
 }

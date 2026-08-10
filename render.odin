@@ -16,17 +16,18 @@ FRAME_TIME :: 1.0 / TARGET_FPS
 VIRTUAL_HEIGHT :: 240 //TODO: figure out the value
 
 Renderer :: struct {
-	window:   glfw.WindowHandle,
-	camera:   Camera,
-	vao:      u32,
-	vbo:      u32,
-	texture:  u32,
-	u_res:    i32,
-	u_tex:    i32,
-	u_cam:    i32,
-	u_zoom:   i32,
+	window:         glfw.WindowHandle,
+	camera:         Camera,
+	vao:            u32,
+	vbo:            u32,
+	texture:        u32,
+	u_res:          i32,
+	u_tex:          i32,
+	u_cam:          i32,
+	u_zoom:         i32,
+	u_world_height: i32,
 	//TODO: probably split vertices onto its own arena, reset every frame
-	vertices: [dynamic]f32,
+	vertices:       [dynamic]f32,
 }
 
 init_renderer :: proc() -> (renderer: Renderer, ok: bool) {
@@ -37,7 +38,13 @@ init_renderer :: proc() -> (renderer: Renderer, ok: bool) {
 
 	glfw.WindowHint(glfw.CONTEXT_VERSION_MAJOR, 3)
 	glfw.WindowHint(glfw.CONTEXT_VERSION_MINOR, 3)
-	glfw.WindowHint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
+	//TODO: opengl errors
+	// glfw.WindowHint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
+	// glfw.WindowHint(glfw.OPENGL_DEBUG_CONTEXT, 1)
+	//TODO: can use
+	// if err := gl.GetError(); err != gl.NO_ERROR {
+	// 	log.errorf("GL error 0x%x at <label>", err)
+	// }
 
 	window := glfw.CreateWindow(800, 600, "Traditional Roguelike", nil, nil)
 	if window == nil {
@@ -51,6 +58,10 @@ init_renderer :: proc() -> (renderer: Renderer, ok: bool) {
 	glfw.SwapInterval(0) // vsync off
 
 	gl.load_up_to(3, 3, glfw.gl_set_proc_address)
+
+	gl.Enable(gl.DEBUG_OUTPUT)
+	gl.Enable(gl.DEBUG_OUTPUT_SYNCHRONOUS)
+	//gl.DebugMessageCallback(gl_debug_callback, nil)
 
 	gl.Viewport(0, 0, 800, 600)
 	//glfw.SetFramebufferSizeCallback(window, window_resize)
@@ -117,6 +128,8 @@ init_renderer :: proc() -> (renderer: Renderer, ok: bool) {
 	renderer.u_cam = gl.GetUniformLocation(shader_program.id, "uCam")
 	renderer.u_zoom = gl.GetUniformLocation(shader_program.id, "uZoom")
 
+	renderer.u_world_height = gl.GetUniformLocation(shader_program.id, "uWorldHeight")
+
 	renderer.camera.zoom = 1.0
 	renderer.camera.smoothing = 5.0
 	renderer.camera.manual = false
@@ -130,6 +143,7 @@ arrow_rotation: f32 = 0
 draw_game_state :: proc(renderer: ^Renderer, game_state: ^Game_state) {
 	window := renderer.window
 	entities := &game_state.entities
+	particles := &game_state.particles
 	player_id := entities.player_id
 	player := get_entity(entities, player_id)
 	circle := get_entity_collider(player)
@@ -160,8 +174,23 @@ draw_game_state :: proc(renderer: ^Renderer, game_state: ^Game_state) {
 	gl.Uniform1i(renderer.u_tex, 0)
 	gl.Uniform2f(renderer.u_cam, camera.pos.x, camera.pos.y)
 	gl.Uniform1f(renderer.u_zoom, camera.zoom)
+	gl.Uniform1f(renderer.u_world_height, f32(LEVEL_H * TILE_H))
 
 	gl.BindVertexArray(renderer.vao)
+
+	//PARTICLES
+	{
+		for i: u32 = 0; i < particles.particle_count; i += 1 {
+			particle := particles.particles[i]
+			rect := Rect {
+				particle.pos.x,
+				particle.pos.y,
+				particle.pos.x + particle.size.x,
+				particle.pos.y + particle.size.y,
+			}
+			push_rect(&renderer.vertices, rect, 1.0, particle.color)
+		}
+	}
 
 	for tile, index in current_level.tiles {
 		push_quad_tile(&renderer.vertices, index, sprite_table[tile.asset_id], tile.color)
@@ -201,18 +230,19 @@ draw_game_state :: proc(renderer: ^Renderer, game_state: ^Game_state) {
 		{1.0, 1.0, 1.0, 1.0},
 	)
 
-	if player.attack_animation {
+	if player.attack_animation > 0 {
 		//TODO: is attack_range taking scale into account?
 		push_slash_arc(
 			&renderer.vertices,
 			{player_collider.x, player_collider.y},
 			18, //TODO: @fix no idea if i should scale or not
 			player.attack_range,
+			1,
 			player.rotation,
 			player.attack_angle,
 			[4]f32{1, 1, 1, 1 - t}, // white, fades out
 		)
-		player.attack_animation = false
+		cooldown(&player.attack_animation, f32(game_state.dt))
 	}
 
 
@@ -220,11 +250,17 @@ draw_game_state :: proc(renderer: ^Renderer, game_state: ^Game_state) {
 	// when do i apply scaling??
 	//TODO: doesent work with walls, works fine with entities
 
-	draw_colliders := true
+	draw_colliders := false
 	for i: u32 = 0; i < entities.entity_count; i += 1 {
 		if draw_colliders {
 			circle := get_entity_collider(&entities.entities[i])
-			push_circle(&renderer.vertices, {circle.x, circle.y}, circle.r, {1.0, 1.0, 1.0, 1.0})
+			push_circle(
+				&renderer.vertices,
+				{circle.x, circle.y},
+				circle.r,
+				1,
+				{1.0, 1.0, 1.0, 1.0},
+			)
 		}
 	}
 
@@ -382,7 +418,7 @@ push_quad_rotated :: proc(
 	x3, y3 := rotate_point(destination.x0, destination.y1, center, cos, sin)
 
 	destination_result: Rect_points = {x0, y0, x1, y1, x2, y2, x3, y3}
-	push_quad_points(vertices, destination_result, -1.0, source, {1.0, 1.0, 1.0, 1.0})
+	push_quad_points(vertices, destination_result, 1.0, source, {1.0, 1.0, 1.0, 1.0})
 }
 
 
@@ -397,7 +433,8 @@ push_quad_entity :: proc(vertices: ^[dynamic]f32, entity: Entity) {
 
 	id := entity.asset_id
 	source := sprite_table[id]
-	depth := entity.pos.y + entity.size.y
+	level_height := f32(LEVEL_H * TILE_H)
+	depth := 0.1 + ((entity.pos.y + entity.size.y) / level_height) * 0.1
 
 	color := entity.color
 	push_quad(vertices, destination, depth, source, color)
@@ -407,7 +444,8 @@ push_quad_entity :: proc(vertices: ^[dynamic]f32, entity: Entity) {
 push_quad_tile :: proc(vertices: ^[dynamic]f32, index: int, sprite: Sprite, color: Color) {
 	tile_pos := get_tile_pos(u32(index))
 	pixel_pos := get_tile_pixel_pos(tile_pos)
-	depth: f32 = f32(pixel_pos.y + TILE_H)
+	level_height := f32(LEVEL_H) * f32(TILE_H)
+	depth: f32 = (f32(pixel_pos.y + TILE_H) / level_height) * 0.1
 	destination := Rect {
 		x0 = f32(pixel_pos.x),
 		y0 = f32(pixel_pos.y),
@@ -428,6 +466,21 @@ push_quad :: proc(
 	x0, y0, x1, y1 := destination.x0, destination.y0, destination.x1, destination.y1
 	u0, v0, u1, v1 := source.u0, source.v0, source.u1, source.v1
 	//TODO: could be fun to make a gradient with two colors
+	r, g, b, a := color[0], color[1], color[2], color[3]
+
+	d := depth
+
+	append(vertices, x0, y0, u0, v0, r, g, b, a, d)
+	append(vertices, x1, y0, u1, v0, r, g, b, a, d)
+	append(vertices, x1, y1, u1, v1, r, g, b, a, d)
+	append(vertices, x0, y0, u0, v0, r, g, b, a, d)
+	append(vertices, x1, y1, u1, v1, r, g, b, a, d)
+	append(vertices, x0, y1, u0, v1, r, g, b, a, d)
+}
+
+push_rect :: proc(vertices: ^[dynamic]f32, destination: Rect, depth: f32, color: [4]f32) {
+	x0, y0, x1, y1 := destination.x0, destination.y0, destination.x1, destination.y1
+	u0, v0, u1, v1: f32 = -1, -1, -1, -1
 	r, g, b, a := color[0], color[1], color[2], color[3]
 
 	d := depth
@@ -470,7 +523,7 @@ flush_batch :: proc(vertices: ^[dynamic]f32, vbo: u32) {
 			raw_data(vertices^),
 			gl.DYNAMIC_DRAW,
 		)
-		gl.DrawArrays(gl.TRIANGLES, 0, i32(len(vertices) / 8)) //TODO: change 4 to a variable
+		gl.DrawArrays(gl.TRIANGLES, 0, i32(len(vertices) / 9)) //TODO: change 4 to a variable
 		clear(vertices)
 	}
 }
@@ -478,6 +531,7 @@ push_slash_arc :: proc(
 	vertices: ^[dynamic]f32,
 	center: la.Vector2f32,
 	inner_r, outer_r: f32,
+	depth: f32,
 	facing_angle: f32,
 	arc_width: f32,
 	color: [4]f32,
@@ -498,12 +552,12 @@ push_slash_arc :: proc(
 		in0, out0 := center + d0 * inner_r, center + d0 * outer_r
 		in1, out1 := center + d1 * inner_r, center + d1 * outer_r
 
-		append(vertices, in0.x, in0.y, -1, -1, r, g, b, a)
-		append(vertices, out0.x, out0.y, -1, -1, r, g, b, a)
-		append(vertices, out1.x, out1.y, -1, -1, r, g, b, a)
-		append(vertices, in0.x, in0.y, -1, -1, r, g, b, a)
-		append(vertices, out1.x, out1.y, -1, -1, r, g, b, a)
-		append(vertices, in1.x, in1.y, -1, -1, r, g, b, a)
+		append(vertices, in0.x, in0.y, -1, -1, r, g, b, a, depth)
+		append(vertices, out0.x, out0.y, -1, -1, r, g, b, a, depth)
+		append(vertices, out1.x, out1.y, -1, -1, r, g, b, a, depth)
+		append(vertices, in0.x, in0.y, -1, -1, r, g, b, a, depth)
+		append(vertices, out1.x, out1.y, -1, -1, r, g, b, a, depth)
+		append(vertices, in1.x, in1.y, -1, -1, r, g, b, a, depth)
 	}
 }
 
@@ -511,6 +565,7 @@ push_circle :: proc(
 	vertices: ^[dynamic]f32,
 	center: la.Vector2f32,
 	radius: f32,
+	depth: f32,
 	color: [4]f32,
 	segments: int = 32,
 ) {
@@ -524,9 +579,9 @@ push_circle :: proc(
 		p0 := center + la.Vector2f32{math.cos(a0), math.sin(a0)} * radius
 		p1 := center + la.Vector2f32{math.cos(a1), math.sin(a1)} * radius
 
-		append(vertices, center.x, center.y, -1, -1, r, g, b, a)
-		append(vertices, p0.x, p0.y, -1, -1, r, g, b, a)
-		append(vertices, p1.x, p1.y, -1, -1, r, g, b, a)
+		append(vertices, center.x, center.y, -1, -1, r, g, b, a, depth)
+		append(vertices, p0.x, p0.y, -1, -1, r, g, b, a, depth)
+		append(vertices, p1.x, p1.y, -1, -1, r, g, b, a, depth)
 	}
 }
 
@@ -534,6 +589,7 @@ push_ring :: proc(
 	vertices: ^[dynamic]f32,
 	center: la.Vector2f32,
 	inner_r, outer_r: f32,
+	depth: f32,
 	color: [4]f32,
 	segments: int = 32,
 ) {
@@ -550,12 +606,12 @@ push_ring :: proc(
 		in0, out0 := center + d0 * inner_r, center + d0 * outer_r
 		in1, out1 := center + d1 * inner_r, center + d1 * outer_r
 
-		append(vertices, in0.x, in0.y, -1, -1, r, g, b, a)
-		append(vertices, out0.x, out0.y, -1, -1, r, g, b, a)
-		append(vertices, out1.x, out1.y, -1, -1, r, g, b, a)
-		append(vertices, in0.x, in0.y, -1, -1, r, g, b, a)
-		append(vertices, out1.x, out1.y, -1, -1, r, g, b, a)
-		append(vertices, in1.x, in1.y, -1, -1, r, g, b, a)
+		append(vertices, in0.x, in0.y, -1, -1, r, g, b, a, depth)
+		append(vertices, out0.x, out0.y, -1, -1, r, g, b, a, depth)
+		append(vertices, out1.x, out1.y, -1, -1, r, g, b, a, depth)
+		append(vertices, in0.x, in0.y, -1, -1, r, g, b, a, depth)
+		append(vertices, out1.x, out1.y, -1, -1, r, g, b, a, depth)
+		append(vertices, in1.x, in1.y, -1, -1, r, g, b, a, depth)
 	}
 }
 //TODO: @finish
@@ -581,3 +637,16 @@ push_ring :: proc(
 // 	for d < -math.PI {d += math.PI * 2}
 // 	return d
 // }
+
+gl_debug_callback :: proc "c" (
+	source: u32,
+	type: u32,
+	id: u32,
+	severity: u32,
+	length: i32,
+	message: cstring,
+	user_param: rawptr,
+) {
+	context = runtime.default_context()
+	log.errorf("GL DEBUG: %s", message)
+}

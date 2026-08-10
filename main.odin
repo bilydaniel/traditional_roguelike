@@ -1,6 +1,7 @@
 package main
 
 import "base:runtime"
+import "core:debug/trace"
 import "core:fmt"
 import "core:log"
 import "core:math"
@@ -33,16 +34,22 @@ import "vendor:glfw"
 
 Game_state :: struct {
 	//TODO: cache lines
-	levels:        [dynamic]Level,
-	current_level: u32,
-	entities:      Entities,
-	entity_map:    map[u32]u32,
-	dt:            f64,
+	levels:         [dynamic]Level,
+	current_level:  u32,
+	entities:       Entities,
+	particles:      Particles,
+	entity_map:     map[u32]u32,
+	dt:             f64,
+	t:              f64,
+	spawn_time:     f64,
+	spawn_time_max: f64,
 }
 
 game_state_init :: proc() -> ^Game_state {
 	//TODO: use a permanent arena, can i somehow investigate the memory usage?
 	game_state := new(Game_state)
+	game_state.spawn_time = 20
+	game_state.spawn_time_max = 10
 	init_entities(&game_state.entities)
 	append(&game_state.levels, Level{})
 	level := &game_state.levels[0]
@@ -99,6 +106,7 @@ main :: proc() {
 	for !glfw.WindowShouldClose(renderer.window) {
 		frame_start := glfw.GetTime()
 		game_state.dt = frame_start - last_time
+		game_state.t += game_state.dt
 		fps_time += game_state.dt
 		fps += 1
 		last_time = frame_start
